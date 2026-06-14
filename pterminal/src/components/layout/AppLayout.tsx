@@ -14,6 +14,7 @@ export function AppLayout() {
   const isDarkMode = useAppStore((s) => s.isDarkMode);
   const setLeftWidth = useAppStore((s) => s.setLeftWidth);
   const setRightWidth = useAppStore((s) => s.setRightWidth);
+  const persistPanelWidths = useAppStore((s) => s.persistPanelWidths);
 
   useEffect(() => {
     document.documentElement.setAttribute(
@@ -35,7 +36,7 @@ export function AppLayout() {
             <div style={{ width: leftWidth, flexShrink: 0 }} className="panel-sidebar h-full">
               <LeftPanel />
             </div>
-            <Resizer onResize={(delta) => setLeftWidth(delta)} />
+            <Resizer onResize={(delta) => setLeftWidth(delta)} onResizeEnd={persistPanelWidths} />
           </>
         ) : null}
 
@@ -50,7 +51,7 @@ export function AppLayout() {
         {/* Right column — collapsible */}
         {isRightPanelVisible ? (
           <>
-            <Resizer onResize={(delta) => setRightWidth(-delta)} />
+            <Resizer onResize={(delta) => setRightWidth(-delta)} onResizeEnd={persistPanelWidths} />
             <div
               style={{ width: rightWidth, flexShrink: 0 }}
               className="panel-sidebar panel-sidebar-right h-full"

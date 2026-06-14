@@ -71,8 +71,8 @@ pub fn run() {
             commands::ai::ai_cancel,
             commands::settings::settings_get,
             commands::settings::settings_set,
+            commands::settings::proxy_reload,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-

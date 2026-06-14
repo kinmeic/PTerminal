@@ -18,4 +18,15 @@ export const settingsService = {
 export const SETTING_KEYS = {
   fontFamily: 'terminal_font_family',
   fontSize: 'terminal_font_size',
+  // UI state persistence (需求 2)
+  leftPanelVisible: 'ui_left_panel_visible',
+  rightPanelVisible: 'ui_right_panel_visible',
+  isDarkMode: 'ui_is_dark_mode',
+  activeTerminalId: 'ui_active_terminal_id',
+  leftWidth: 'ui_left_width',
+  rightWidth: 'ui_right_width',
+  // SOCKS proxy (需求 3)
+  proxySocksUrl: 'proxy_socks_url',
+  proxyApplyAi: 'proxy_apply_ai',
+  proxyApplyHttp: 'proxy_apply_http',
 } as const;

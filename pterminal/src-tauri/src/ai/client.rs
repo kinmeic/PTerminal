@@ -1,17 +1,109 @@
 use crate::ai::AiConfig;
-use reqwest::Client;
+use crate::db::{DbConn, DbPool};
+use reqwest::{Client, Proxy, Url};
+use std::net::IpAddr;
 use std::time::Duration;
+
+/// DB keys persisted by the frontend settings UI.
+pub const KEY_PROXY_SOCKS_URL: &str = "proxy_socks_url";
+pub const KEY_PROXY_APPLY_AI: &str = "proxy_apply_ai";
+pub const KEY_PROXY_APPLY_HTTP: &str = "proxy_apply_http";
 
 /// Per-request timeout for connection tests. Shorter than the streaming client's
 /// 120s default since a connectivity probe should fail fast.
 const TEST_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// User-configured SOCKS5 proxy. When `socks_url` is `Some`, requests that are
+/// not bypassed (localhost / LAN) are routed through it. The two `apply_*`
+/// flags exist so the user can scope which traffic uses the proxy; in practice
+/// all app-layer HTTP currently flows through this single client, so they are
+/// equivalent today, but kept separate for future per-service routing.
+#[derive(Debug, Clone, Default)]
+pub struct ProxyConfig {
+    /// e.g. `socks5://127.0.0.1:1080` or `socks5h://...`. `None` = direct.
+    pub socks_url: Option<String>,
+    pub apply_ai: bool,
+    pub apply_http: bool,
+}
+
 /// Build a shared HTTP client for LLM requests with a generous timeout.
-pub fn build_client() -> Client {
-    Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
-        .expect("failed to build reqwest client")
+/// When `proxy.socks_url` is set, traffic is routed through the SOCKS5 proxy
+/// except for localhost and private/LAN destinations (需求 3).
+pub fn build_client(proxy: &ProxyConfig) -> Client {
+    let mut builder = Client::builder().timeout(Duration::from_secs(120));
+    if let Some(url) = proxy.socks_url.as_deref().filter(|s| !s.trim().is_empty()) {
+        if proxy.apply_ai || proxy.apply_http {
+            match build_socks_proxy(url) {
+                Ok(p) => builder = builder.proxy(p),
+                Err(e) => log::error!("invalid SOCKS proxy url {url:?}: {e}; falling back to direct"),
+            }
+        }
+    }
+    builder.build().expect("failed to build reqwest client")
+}
+
+/// Load the proxy settings from the `settings` table. Defaults to a direct
+/// connection (no proxy) when nothing is configured or the DB is unavailable.
+/// Used both at app startup (to seed `AppState::http`) and when the user
+/// changes settings (via the `proxy_reload` command).
+pub fn load_proxy_config(db: &DbPool) -> ProxyConfig {
+    let conn: Option<DbConn> = db.get().ok();
+    let get = |key: &str| -> Option<String> {
+        conn.as_ref().and_then(|c| {
+            c.query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                rusqlite::params![key],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .ok()
+            .flatten()
+        })
+    };
+    let socks_url = get(KEY_PROXY_SOCKS_URL)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let apply_ai = get(KEY_PROXY_APPLY_AI)
+        .map(|s| s == "1" || s.eq_ignore_ascii_case("true"))
+        .unwrap_or(true);
+    let apply_http = get(KEY_PROXY_APPLY_HTTP)
+        .map(|s| s == "1" || s.eq_ignore_ascii_case("true"))
+        .unwrap_or(true);
+    ProxyConfig {
+        socks_url,
+        apply_ai,
+        apply_http,
+    }
+}
+
+/// Construct a per-request SOCKS5 proxy that bypasses localhost and private
+/// IP ranges. Uses `Proxy::custom` because reqwest's `NoProxy` only matches
+/// host suffixes, not CIDR ranges.
+fn build_socks_proxy(socks_url: &str) -> anyhow::Result<Proxy> {
+    let proxy_url: Url = socks_url.parse()?;
+    Ok(Proxy::custom(move |target: &Url| {
+        if is_bypass(target.host_str().unwrap_or("")) {
+            return None;
+        }
+        Some(proxy_url.clone())
+    }))
+}
+
+/// Whether a target host should bypass the proxy: localhost or a private/LAN
+/// IP literal. Uses std's IP classification (no extra deps). Note this only
+/// catches literal IPs and the string "localhost"; a hostname that *resolves*
+/// to a private IP (e.g. `nas.local`) is NOT detected — acceptable for AI API
+/// endpoints which are public hostnames.
+fn is_bypass(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    match host.parse::<IpAddr>() {
+        Ok(IpAddr::V4(v4)) => {
+            v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified()
+        }
+        Ok(IpAddr::V6(v6)) => v6.is_loopback() || v6.is_unspecified(),
+        Err(_) => false,
+    }
 }
 
 /// Join a base URL with an API path, tolerating users who include `/v1` in the

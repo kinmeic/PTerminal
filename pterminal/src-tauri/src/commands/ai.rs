@@ -152,7 +152,16 @@ async fn run_stream(
         };
 
     // Reuse the app-wide HTTP client (connection pool / TLS session sharing).
-    let client = state.http.clone();
+    // The client lives behind a RwLock so proxy settings can be swapped at
+    // runtime; we clone it out (cheap, internal Arc) and release the lock
+    // immediately so the stream never holds the lock.
+    let client = match state.http.read() {
+        Ok(guard) => guard.clone(),
+        Err(poisoned) => {
+            log::error!("http lock poisoned — recovering");
+            poisoned.into_inner().clone()
+        }
+    };
     let mut full = String::new();
 
     let stream = match ai::stream::stream_chat(&client, &cfg, messages).await {
@@ -336,7 +345,7 @@ pub struct AiConfigDto {
 pub fn ai_config(state: State<'_, AppState>) -> Result<AiConfigDto, String> {
     let cfg = ai::load_config(&state.db);
     Ok(AiConfigDto {
-        provider: format!("{:?}", cfg.provider).to_lowercase(),
+        provider: cfg.provider_id,
         model: cfg.model,
         base_url: cfg.base_url,
         has_api_key: cfg.api_key.is_some(),
@@ -401,5 +410,12 @@ pub fn ai_messages(state: State<'_, AppState>, terminal_id: String) -> Result<cr
 #[tauri::command]
 pub async fn ai_test(state: State<'_, AppState>) -> Result<crate::ai::client::TestResult, String> {
     let cfg = ai::load_config(&state.db);
-    Ok(crate::ai::client::test_connection(&state.http, &cfg).await)
+    let client = match state.http.read() {
+        Ok(guard) => guard.clone(),
+        Err(poisoned) => {
+            log::error!("http lock poisoned — recovering");
+            poisoned.into_inner().clone()
+        }
+    };
+    Ok(crate::ai::client::test_connection(&client, &cfg).await)
 }

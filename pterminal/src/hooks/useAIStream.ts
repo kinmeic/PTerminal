@@ -17,7 +17,6 @@ export function useAIStream(): void {
 
   const bufferRef = useRef<string>('');
   const rafRef = useRef<number>(0);
-  const turnTerminalIdRef = useRef<string | null>(null);
   // Flush function shared between the streaming effect and the terminal-switch
   // effect, so a switch can drain pending buffered text before resetting.
   const flushRef = useRef<() => void>(() => {});
@@ -42,16 +41,12 @@ export function useAIStream(): void {
     const unlisteners: UnlistenFn[] = [];
 
     listen<AIStreamPayload>('ai-delta', (event) => {
-      const { terminalId, delta } = event.payload;
-      // Only apply deltas for the terminal that initiated the turn (captured
-      // on the first delta), and only if it is the active terminal.
-      if (turnTerminalIdRef.current === null) {
-        turnTerminalIdRef.current = terminalId;
-      }
+      const { requestId, terminalId, delta } = event.payload;
+      const state = useAppStore.getState();
       if (
         delta &&
-        turnTerminalIdRef.current === terminalId &&
-        terminalId === useAppStore.getState().activeTerminalId
+        state.aiStreams[terminalId] === requestId &&
+        terminalId === state.activeTerminalId
       ) {
         bufferRef.current += delta;
         scheduleFlush();
@@ -59,12 +54,12 @@ export function useAIStream(): void {
     }).then((un) => unlisteners.push(un));
 
     listen<AIStreamPayload>('ai-done', (event) => {
-      const { terminalId, error } = event.payload;
-      if (turnTerminalIdRef.current === terminalId) {
+      const { requestId, terminalId, error } = event.payload;
+      const state = useAppStore.getState();
+      if (state.aiStreams[terminalId] === requestId) {
         // Flush any remaining buffered text before finalizing.
         flush();
-        finishAiTurn(error);
-        turnTerminalIdRef.current = null;
+        finishAiTurn(error, terminalId);
       }
     }).then((un) => unlisteners.push(un));
 
@@ -79,7 +74,6 @@ export function useAIStream(): void {
   // discarded (the assistant bubble would stay stale until a full reload).
   useEffect(() => {
     flushRef.current();
-    turnTerminalIdRef.current = null;
     bufferRef.current = '';
   }, [activeTerminalId]);
 }

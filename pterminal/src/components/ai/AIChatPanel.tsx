@@ -86,7 +86,7 @@ export function AIChatPanel() {
         terminalContext: terminalContext || undefined,
       });
     } catch (err) {
-      useAppStore.getState().finishAiTurn(String(err));
+      useAppStore.getState().finishAiTurn(String(err), activeTerminalId);
     }
   };
 
@@ -166,13 +166,20 @@ function MessageBubble({ message }: { message: AIMessage }) {
   const runSuggestedCommand = useAppStore((s) => s.runSuggestedCommand);
   const activeTerminalId = useAppStore((s) => s.activeTerminalId);
 
-  // Extract fenced ```sh blocks for a "Run" affordance.
-  const codeBlocks = extractCodeBlocks(message.content);
+  // Strip <think>…</think> reasoning blocks from the displayed text. Some
+  // providers (DeepSeek, Qwen, etc.) stream hidden chain-of-thought wrapped in
+  // these tags; we never want it in the chat bubble. Also hides an in-progress,
+  // not-yet-closed <think> block so partial reasoning doesn't flash by while
+  // streaming. User messages are left untouched.
+  const displayContent = isUser ? message.content : stripThinkBlocks(message.content);
+  // Extract fenced ```sh blocks from the filtered text so a command inside a
+  // think block is never offered as runnable.
+  const codeBlocks = extractCodeBlocks(displayContent);
 
   return (
     <div className={`ai-msg ${isUser ? 'ai-msg-user' : 'ai-msg-assistant'}`}>
       <div className="ai-msg-bubble">
-        {message.content || (isUser ? '' : '…')}
+        {displayContent || (isUser ? '' : '…')}
       </div>
       {!isUser && codeBlocks.length > 0 && activeTerminalId && (
         <div className="ai-msg-actions">
@@ -193,6 +200,27 @@ function MessageBubble({ message }: { message: AIMessage }) {
       )}
     </div>
   );
+}
+
+/**
+ * Remove `<think>…</think>` reasoning blocks from provider output.
+ *
+ * Handles three cases:
+ * 1. Completed blocks:  `foo<think>bar</think>baz` → `foobaz`
+ * 2. In-progress block (streaming, closing tag not yet arrived):
+ *    `foo<think>bar` → `foo` (the unclosed reasoning is hidden until it closes)
+ * 3. Orphaned closing tag (edge case):  `foo</think>bar` → `foobar`
+ *
+ * Tags are matched case-insensitively and tolerate surrounding whitespace.
+ */
+function stripThinkBlocks(text: string): string {
+  // Case 1: remove all completed <think>…</think> blocks (non-greedy, multiline).
+  let out = text.replace(/<think>\s*[\s\S]*?<\/think\s*>/gi, '');
+  // Case 2: drop a dangling, still-open <think> and everything after it.
+  out = out.replace(/<think\s*>[\s\S]*$/gi, '');
+  // Case 3: strip any orphaned </think> tags left behind.
+  out = out.replace(/<\/think\s*>/gi, '');
+  return out.trim();
 }
 
 /** Pull ```sh ... ``` fenced blocks out of markdown text. */

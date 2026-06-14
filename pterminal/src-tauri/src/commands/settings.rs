@@ -1,3 +1,4 @@
+use crate::ai::client;
 use crate::db::DbConn;
 use crate::state::AppState;
 use tauri::State;
@@ -29,5 +30,21 @@ pub fn settings_set(state: State<'_, AppState>, key: String, value: String) -> R
         rusqlite::params![key, value],
     )
     .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Rebuild the shared HTTP client from the current proxy settings in the DB.
+/// Called by the frontend after it persists new SOCKS proxy settings via
+/// `settings_set`, so new AI/HTTP requests pick up the change live without an
+/// app restart. The frontend does NOT need to also call this for an initial
+/// proxy config — `AppState::new` reads the proxy at startup.
+#[tauri::command]
+pub fn proxy_reload(state: State<'_, AppState>) -> Result<(), String> {
+    let proxy = client::load_proxy_config(&state.db);
+    state.rebuild_http(&proxy);
+    log::info!(
+        "proxy reloaded: socks_url={:?} apply_ai={} apply_http={}",
+        proxy.socks_url, proxy.apply_ai, proxy.apply_http
+    );
     Ok(())
 }

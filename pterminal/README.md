@@ -2,7 +2,7 @@
 
 A macOS-native AI terminal built with Tauri v2, React, and Rust. Each terminal
 is an isolated PTY session with its own working directory, saved commands,
-history, and AI context.
+and AI context.
 
 ## Features
 
@@ -11,11 +11,11 @@ history, and AI context.
 - **Three-column layout** — terminal list · xterm.js view · assistant panel,
   with draggable resizers and dark/light themes.
 - **Command assistant** — save common commands (global or per-terminal), pin
-  favorites, and click history entries to re-run them instantly.
+  favorites, and re-run them instantly.
 - **AI assistant** — chat, natural-language → command generation, and output
   explanation. Streams responses token-by-token. Supports OpenAI, Anthropic
   Claude, and local Ollama out of the box.
-- **Persistent** — all terminals, commands, history, and AI conversations are
+- **Persistent** — terminals, commands, SSH shortcuts, settings, and AI conversations are
   stored in a local SQLite database.
 
 ## Tech stack
@@ -88,7 +88,7 @@ pterminal/
 ├── src/                      # React frontend
 │   ├── components/
 │   │   ├── ai/               # AI chat panel, suggest bar, settings
-│   │   ├── commands/         # Common commands + history panels
+│   │   ├── commands/         # Common commands panel
 │   │   ├── layout/           # Three-column layout + resizers
 │   │   └── terminal/         # xterm.js wrapper
 │   ├── hooks/                # Tauri events, AI stream, shortcuts
@@ -98,7 +98,7 @@ pterminal/
 └── src-tauri/
     └── src/
         ├── ai/               # LLM client, prompts, SSE stream parser
-        ├── commands/         # Tauri commands (terminal/commands/history/ai)
+        ├── commands/         # Tauri commands (terminal/commands/ssh/ai/settings)
         ├── db.rs             # SQLite pool + migrations
         ├── state.rs          # AppState + live PTY sessions
         └── models.rs         # DTO structs
@@ -106,11 +106,11 @@ pterminal/
 
 ## Database schema
 
-Five tables (auto-created on first launch):
+Core tables (auto-created on first launch):
 
 - `terminals` — terminal configurations (name, cwd, shell)
 - `commands` — saved commands (global when `terminal_id` is NULL)
-- `command_history` — captured commands per terminal
+- `ssh_shortcuts` — saved SSH connection shortcuts
 - `ai_messages` — AI conversation turns per terminal
 - `settings` — key/value application settings (incl. AI config)
 

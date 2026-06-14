@@ -245,11 +245,7 @@ pub fn terminal_spawn(
     fetch_terminal(&state, &id)
 }
 
-/// Write keyboard input to a terminal's PTY and capture completed commands.
-///
-/// `record_history_flag` defaults to true when omitted. SSH auto-connect and
-/// other programmatic writes pass `false` so connection commands never pollute
-/// the user-facing command history.
+/// Write keyboard input to a terminal's PTY.
 #[tauri::command]
 pub fn terminal_write(
     state: State<'_, AppState>,

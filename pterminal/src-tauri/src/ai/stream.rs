@@ -2,6 +2,7 @@ use crate::ai::client::join_api_url;
 use crate::ai::{ChatMessage, Provider};
 use futures_util::StreamExt;
 use reqwest::Client;
+use std::collections::VecDeque;
 use std::pin::Pin;
 
 /// Boxed, Send stream of text deltas.
@@ -48,28 +49,13 @@ async fn stream_openai(
         req = req.bearer_auth(key);
     }
     let response = req.send().await?.error_for_status()?;
-    let byte_stream = response.bytes_stream();
-
-    // Parse the SSE byte stream into delta events.
-    let stream = byte_stream
-        .map(|chunk_result| match chunk_result {
-            Ok(c) => parse_openai_chunk(&c),
-            Err(e) => Ok(Some(StreamEvent::Error(e.to_string()))),
-        })
-        .filter_map(|item: Result<Option<StreamEvent>, anyhow::Error>| async move {
-            match item {
-                Ok(Some(ev)) => Some(Ok(ev)),
-                Ok(None) => None,
-                Err(e) => Some(Err(e)),
-            }
-        });
+    let stream = frame_stream(response.bytes_stream(), parse_openai_frame);
 
     Ok(Box::pin(stream))
 }
 
-/// Parse one SSE chunk buffer; may contain multiple `data:` lines.
-fn parse_openai_chunk(bytes: &[u8]) -> anyhow::Result<Option<StreamEvent>> {
-    let text = String::from_utf8_lossy(bytes);
+/// Parse one complete SSE frame; may contain multiple `data:` lines.
+fn parse_openai_frame(text: &str) -> anyhow::Result<Vec<StreamEvent>> {
     let mut combined_delta = String::new();
     let mut saw_done = false;
 
@@ -108,13 +94,7 @@ fn parse_openai_chunk(bytes: &[u8]) -> anyhow::Result<Option<StreamEvent>> {
         }
     }
 
-    if saw_done && combined_delta.is_empty() {
-        Ok(Some(StreamEvent::Done))
-    } else if !combined_delta.is_empty() {
-        Ok(Some(StreamEvent::Delta(combined_delta)))
-    } else {
-        Ok(None)
-    }
+    Ok(events_from_delta_and_done(combined_delta, saw_done))
 }
 
 // ---- Anthropic Claude ------------------------------------------------------
@@ -158,27 +138,13 @@ async fn stream_anthropic(
         .send()
         .await?
         .error_for_status()?;
-    let byte_stream = response.bytes_stream();
-
-    let stream = byte_stream
-        .map(|chunk_result| match chunk_result {
-            Ok(c) => parse_anthropic_chunk(&c),
-            Err(e) => Ok(Some(StreamEvent::Error(e.to_string()))),
-        })
-        .filter_map(|item: Result<Option<StreamEvent>, anyhow::Error>| async move {
-            match item {
-                Ok(Some(ev)) => Some(Ok(ev)),
-                Ok(None) => None,
-                Err(e) => Some(Err(e)),
-            }
-        });
+    let stream = frame_stream(response.bytes_stream(), parse_anthropic_frame);
 
     Ok(Box::pin(stream))
 }
 
-/// Parse Anthropic SSE events (`content_block_delta` carries text deltas).
-fn parse_anthropic_chunk(bytes: &[u8]) -> anyhow::Result<Option<StreamEvent>> {
-    let text = String::from_utf8_lossy(bytes);
+/// Parse one complete Anthropic SSE frame (`content_block_delta` carries text deltas).
+fn parse_anthropic_frame(text: &str) -> anyhow::Result<Vec<StreamEvent>> {
     let mut combined_delta = String::new();
     let mut saw_stop = false;
 
@@ -208,11 +174,115 @@ fn parse_anthropic_chunk(bytes: &[u8]) -> anyhow::Result<Option<StreamEvent>> {
         }
     }
 
-    if saw_stop && combined_delta.is_empty() {
-        Ok(Some(StreamEvent::Done))
-    } else if !combined_delta.is_empty() {
-        Ok(Some(StreamEvent::Delta(combined_delta)))
-    } else {
-        Ok(None)
+    Ok(events_from_delta_and_done(combined_delta, saw_stop))
+}
+
+fn events_from_delta_and_done(delta: String, done: bool) -> Vec<StreamEvent> {
+    let mut events = Vec::new();
+    if !delta.is_empty() {
+        events.push(StreamEvent::Delta(delta));
     }
+    if done {
+        events.push(StreamEvent::Done);
+    }
+    events
+}
+
+fn frame_stream<S, B, F>(byte_stream: S, parser: F) -> DeltaStream
+where
+    S: futures_util::Stream<Item = Result<B, reqwest::Error>> + Send + Unpin + 'static,
+    B: AsRef<[u8]> + Send + 'static,
+    F: Fn(&str) -> anyhow::Result<Vec<StreamEvent>> + Send + Copy + 'static,
+{
+    struct ParserState<S> {
+        byte_stream: S,
+        buffer: Vec<u8>,
+        pending: VecDeque<anyhow::Result<StreamEvent>>,
+        eof: bool,
+    }
+
+    let state = ParserState {
+        byte_stream,
+        buffer: Vec::new(),
+        pending: VecDeque::new(),
+        eof: false,
+    };
+
+    let stream = futures_util::stream::unfold(state, move |mut state| async move {
+        loop {
+            if let Some(item) = state.pending.pop_front() {
+                return Some((item, state));
+            }
+            if let Some(frame) = take_frame(&mut state.buffer) {
+                enqueue_parsed_frame(&mut state.pending, parser, &frame);
+                continue;
+            }
+            if state.eof {
+                if state.buffer.is_empty() {
+                    return None;
+                }
+                let frame = std::mem::take(&mut state.buffer);
+                enqueue_parsed_frame(&mut state.pending, parser, &frame);
+                continue;
+            }
+
+            match state.byte_stream.next().await {
+                Some(Ok(bytes)) => state.buffer.extend_from_slice(bytes.as_ref()),
+                Some(Err(e)) => state
+                    .pending
+                    .push_back(Ok(StreamEvent::Error(e.to_string()))),
+                None => state.eof = true,
+            }
+        }
+    });
+
+    Box::pin(stream)
+}
+
+fn enqueue_parsed_frame<F>(
+    pending: &mut VecDeque<anyhow::Result<StreamEvent>>,
+    parser: F,
+    frame: &[u8],
+) where
+    F: Fn(&str) -> anyhow::Result<Vec<StreamEvent>>,
+{
+    match std::str::from_utf8(frame) {
+        Ok(text) => match parser(text) {
+            Ok(events) => pending.extend(events.into_iter().map(Ok)),
+            Err(e) => pending.push_back(Err(e)),
+        },
+        Err(e) => pending.push_back(Err(anyhow::anyhow!("invalid UTF-8 in stream frame: {e}"))),
+    }
+}
+
+fn take_frame(buffer: &mut Vec<u8>) -> Option<Vec<u8>> {
+    let boundary = find_boundary(buffer)?;
+    let frame = buffer[..boundary.start].to_vec();
+    buffer.drain(..boundary.end);
+    Some(frame)
+}
+
+struct Boundary {
+    start: usize,
+    end: usize,
+}
+
+fn find_boundary(buffer: &[u8]) -> Option<Boundary> {
+    for (idx, pair) in buffer.windows(2).enumerate() {
+        if pair == b"\n\n" {
+            return Some(Boundary {
+                start: idx,
+                end: idx + 2,
+            });
+        }
+    }
+    for (idx, quartet) in buffer.windows(4).enumerate() {
+        if quartet == b"\r\n\r\n" {
+            return Some(Boundary {
+                start: idx,
+                end: idx + 4,
+            });
+        }
+    }
+    None
 }

@@ -37,6 +37,10 @@ interface AppState {
   /** Request id of the in-flight AI stream, if any. Used to call `ai_cancel`.
    * Set by `startAiTurn`, cleared by `finishAiTurn`. */
   activeAiRequestId: string | null;
+  /** Terminal that owns the in-flight AI stream. */
+  activeAiTerminalId: string | null;
+  /** In-flight AI request ids by terminal id. */
+  aiStreams: Record<string, string>;
 
   // UI state
   leftWidth: number;
@@ -88,7 +92,7 @@ interface AppState {
   /** Append a streamed delta to the latest assistant message. */
   appendAiDelta: (delta: string) => void;
   /** Mark the current stream finished (optionally with an error). */
-  finishAiTurn: (error?: string) => void;
+  finishAiTurn: (error?: string, terminalId?: string) => void;
   /** Re-run a suggested command in the active terminal. */
   runSuggestedCommand: (terminalId: string, command: string) => Promise<void>;
 
@@ -97,10 +101,14 @@ interface AppState {
   setLeftWidth: (delta: number) => void;
   /** Apply a delta (px) to the right panel width, clamped to [MIN, MAX]. */
   setRightWidth: (delta: number) => void;
+  /** Persist the current panel widths to settings (call on drag end). */
+  persistPanelWidths: () => void;
   toggleDarkMode: () => void;
   toggleRightPanel: () => void;
   toggleLeftPanel: () => void;
   setAiMessages: (messages: AIMessage[]) => void;
+  /** Restore saved UI state (panel visibility, theme, widths) on startup. */
+  loadUiState: () => Promise<void>;
 
   // --- Terminal appearance ---
   fontFamily: string;
@@ -120,6 +128,20 @@ const MAX_PANEL_WIDTH = 350;
 const DEFAULT_LEFT_WIDTH = 280;
 const DEFAULT_RIGHT_WIDTH = 320;
 
+/**
+ * Apply a dark/light theme to the document + re-theme every live xterm.
+ * Shared by `toggleDarkMode` (runtime) and `loadUiState` (startup restore) so
+ * both paths flip CSS variables and repaint terminals identically.
+ */
+function applyTheme(isDark: boolean) {
+  document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+  requestAnimationFrame(() => {
+    import('@/services/terminalRegistry').then(({ terminalRegistry }) =>
+      terminalRegistry.rethemeAll()
+    );
+  });
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   terminals: [],
   activeTerminalId: null,
@@ -130,6 +152,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   aiConfig: null,
   isAiStreaming: false,
   activeAiRequestId: null,
+  activeAiTerminalId: null,
+  aiStreams: {},
   leftWidth: DEFAULT_LEFT_WIDTH,
   rightWidth: DEFAULT_RIGHT_WIDTH,
   isDarkMode: true,
@@ -140,7 +164,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   fontSize: DEFAULT_FONT_SIZE,
 
   setActiveTerminal: (id) => {
-    set({ activeTerminalId: id });
+    const requestId = id ? get().aiStreams[id] ?? null : null;
+    set({
+      activeTerminalId: id,
+      isAiStreaming: Boolean(requestId),
+      activeAiRequestId: requestId,
+      activeAiTerminalId: requestId ? id : null,
+    });
     if (id) {
       void get().ensureSession(id);
       // Restore this terminal's own font size onto its xterm instance.
@@ -148,6 +178,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       const size = t?.fontSize ?? get().fontSize;
       terminalRegistry.applyFont(id, get().fontFamily, size);
     }
+    // Persist the selection so it can be restored on next launch (需求 2).
+    void settingsService.set(SETTING_KEYS.activeTerminalId, id ?? '').catch(() => {});
   },
 
   ensureSession: async (id) => {
@@ -166,8 +198,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     const terminals = (await terminalService.list()).sort(compareTerminals);
     set({ terminals });
     if (!get().activeTerminalId && terminals.length > 0) {
-      const last = terminals[terminals.length - 1];
-      get().setActiveTerminal(last.id);
+      // Restore the last-selected terminal if it still exists (需求 2),
+      // otherwise fall back to the most recently created one.
+      const savedId = await settingsService.get(SETTING_KEYS.activeTerminalId);
+      const target = savedId && terminals.some((t) => t.id === savedId)
+        ? savedId
+        : terminals[terminals.length - 1].id;
+      get().setActiveTerminal(target);
     }
   },
 
@@ -348,16 +385,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       // never echoes into the terminal scrollback. Acceptable for internal/
       // test hosts — the field is labelled as plaintext in settings.
       if (shortcut.password) {
-        parts.push('sshpass', '-p', shortcut.password);
+        parts.push('sshpass', '-p', shellQuote(shortcut.password));
       }
       parts.push('ssh');
       if (shortcut.port && shortcut.port !== 22) {
-        parts.push('-p', String(shortcut.port));
+        parts.push('-p', shellQuote(String(shortcut.port)));
       }
       if (shortcut.identityFile) {
-        parts.push('-i', shortcut.identityFile);
+        parts.push('-i', shellQuote(shortcut.identityFile));
       }
-      parts.push(`${shortcut.user}@${shortcut.host}`);
+      parts.push(shellQuote(`${shortcut.user}@${shortcut.host}`));
       const sshCommand = parts.join(' ');
       // Spawn a fresh terminal and auto-run the ssh command in it.
       const id = await get().createTerminal({ name: shortcut.name });
@@ -440,6 +477,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       aiMessages: [...state.aiMessages, userMsg, assistantMsg],
       isAiStreaming: true,
       activeAiRequestId: requestId,
+      activeAiTerminalId: terminalId,
+      aiStreams: { ...state.aiStreams, [terminalId]: requestId },
     }));
   },
 
@@ -453,8 +492,23 @@ export const useAppStore = create<AppState>((set, get) => ({
       return { aiMessages: msgs };
     }),
 
-  finishAiTurn: (error) =>
+  finishAiTurn: (error, terminalId) =>
     set((state) => {
+      const nextStreams = { ...state.aiStreams };
+      if (terminalId) delete nextStreams[terminalId];
+
+      if (terminalId && terminalId !== state.activeTerminalId) {
+        return {
+          aiStreams: nextStreams,
+          isAiStreaming: Boolean(state.activeTerminalId && nextStreams[state.activeTerminalId]),
+          activeAiRequestId: state.activeTerminalId ? nextStreams[state.activeTerminalId] ?? null : null,
+          activeAiTerminalId:
+            state.activeTerminalId && nextStreams[state.activeTerminalId]
+              ? state.activeTerminalId
+              : null,
+        };
+      }
+
       const msgs = [...state.aiMessages];
       const last = msgs[msgs.length - 1];
       if (last && last.role === 'assistant' && error) {
@@ -463,7 +517,16 @@ export const useAppStore = create<AppState>((set, get) => ({
           content: last.content || `⚠ ${error}`,
         };
       }
-      return { aiMessages: msgs, isAiStreaming: false, activeAiRequestId: null };
+      return {
+        aiMessages: msgs,
+        aiStreams: nextStreams,
+        isAiStreaming: Boolean(state.activeTerminalId && nextStreams[state.activeTerminalId]),
+        activeAiRequestId: state.activeTerminalId ? nextStreams[state.activeTerminalId] ?? null : null,
+        activeAiTerminalId:
+          state.activeTerminalId && nextStreams[state.activeTerminalId]
+            ? state.activeTerminalId
+            : null,
+      };
     }),
 
   runSuggestedCommand: async (terminalId, command) => {
@@ -491,24 +554,60 @@ export const useAppStore = create<AppState>((set, get) => ({
   toggleDarkMode: () =>
     set((state) => {
       const newMode = !state.isDarkMode;
-      document.documentElement.setAttribute(
-        'data-theme',
-        newMode ? 'dark' : 'light'
-      );
-      // Re-theme xterm instances after the CSS variables have flipped.
-      requestAnimationFrame(() => {
-        import('@/services/terminalRegistry').then(({ terminalRegistry }) =>
-          terminalRegistry.rethemeAll()
-        );
-      });
+      applyTheme(newMode);
+      // Persist so the theme survives restart (需求 2).
+      void settingsService.set(SETTING_KEYS.isDarkMode, newMode ? '1' : '0').catch(() => {});
       return { isDarkMode: newMode };
     }),
 
   toggleRightPanel: () =>
-    set((state) => ({ isRightPanelVisible: !state.isRightPanelVisible })),
+    set((state) => {
+      const next = !state.isRightPanelVisible;
+      void settingsService.set(SETTING_KEYS.rightPanelVisible, next ? '1' : '0').catch(() => {});
+      return { isRightPanelVisible: next };
+    }),
 
   toggleLeftPanel: () =>
-    set((state) => ({ isLeftPanelVisible: !state.isLeftPanelVisible })),
+    set((state) => {
+      const next = !state.isLeftPanelVisible;
+      void settingsService.set(SETTING_KEYS.leftPanelVisible, next ? '1' : '0').catch(() => {});
+      return { isLeftPanelVisible: next };
+    }),
+
+  // Persist the current panel widths. Called on drag end (mouseup) rather than
+  // every mousemove to avoid hammering SQLite during a resize (需求 2).
+  persistPanelWidths: () => {
+    const { leftWidth, rightWidth } = get();
+    void settingsService.set(SETTING_KEYS.leftWidth, String(leftWidth)).catch(() => {});
+    void settingsService.set(SETTING_KEYS.rightWidth, String(rightWidth)).catch(() => {});
+  },
+
+  loadUiState: async () => {
+    try {
+      const [leftVis, rightVis, dark, leftW, rightW] = await Promise.all([
+        settingsService.get(SETTING_KEYS.leftPanelVisible),
+        settingsService.get(SETTING_KEYS.rightPanelVisible),
+        settingsService.get(SETTING_KEYS.isDarkMode),
+        settingsService.get(SETTING_KEYS.leftWidth),
+        settingsService.get(SETTING_KEYS.rightWidth),
+      ]);
+      const patch: Partial<AppState> = {};
+      if (leftVis !== null) patch.isLeftPanelVisible = leftVis === '1';
+      if (rightVis !== null) patch.isRightPanelVisible = rightVis === '1';
+      if (dark !== null) {
+        patch.isDarkMode = dark === '1';
+        // Apply the restored theme to the DOM + xterm instances.
+        applyTheme(patch.isDarkMode);
+      }
+      const lw = leftW ? Number(leftW) : 0;
+      if (lw >= MIN_PANEL_WIDTH && lw <= MAX_PANEL_WIDTH) patch.leftWidth = lw;
+      const rw = rightW ? Number(rightW) : 0;
+      if (rw >= MIN_PANEL_WIDTH && rw <= MAX_PANEL_WIDTH) patch.rightWidth = rw;
+      set(patch);
+    } catch (err) {
+      console.error('Failed to load UI state:', err);
+    }
+  },
 
   // --- Terminal appearance ---
   loadAppearance: async () => {
@@ -609,4 +708,8 @@ function compareTerminals(a: Terminal, b: Terminal): number {
     return a.pinOrder - b.pinOrder;
   }
   return a.createdAt - b.createdAt;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
 }

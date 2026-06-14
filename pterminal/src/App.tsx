@@ -20,6 +20,7 @@ function App() {
   const loadTerminals = useAppStore((s) => s.loadTerminals);
   const loadSshShortcuts = useAppStore((s) => s.loadSshShortcuts);
   const loadAppearance = useAppStore((s) => s.loadAppearance);
+  const loadUiState = useAppStore((s) => s.loadUiState);
   const activeView = useAppStore((s) => s.activeView);
   const setActiveView = useAppStore((s) => s.setActiveView);
   const prevView = useRef(activeView);
@@ -28,7 +29,8 @@ function App() {
     void loadTerminals();
     void loadSshShortcuts();
     void loadAppearance();
-  }, [loadTerminals, loadSshShortcuts, loadAppearance]);
+    void loadUiState();
+  }, [loadTerminals, loadSshShortcuts, loadAppearance, loadUiState]);
 
   // When returning from settings to the terminal view, every xterm canvas was
   // frozen while its ancestor had display:none. fit() alone won't repaint it

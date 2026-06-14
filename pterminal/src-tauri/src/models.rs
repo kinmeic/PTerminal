@@ -171,4 +171,3 @@ pub struct SetFontSizeInput {
     pub id: String,
     pub font_size: Option<i64>,
 }
-

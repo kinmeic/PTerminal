@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, ChevronDown, Plus, Pencil, Trash2, Server, X, Check } from 'lucide-react';
+import { ArrowLeft, ChevronDown, Plus, Pencil, Trash2, Server, X, Check, Settings, Bot, type LucideIcon } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { aiService } from '@/services/aiService';
 import { SettingsTopBar } from '@/components/layout/TopBar';
+import { loadProxyConfig, saveProxyConfig, type ProxyConfig } from '@/services/proxyService';
 import type { AIConfig, SshShortcut } from '@/types';
 
 type Section = 'general' | 'model' | 'ssh';
@@ -36,16 +37,19 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
           <div className="flex-1 overflow-y-auto py-2">
             <MenuItem
               label="常规"
+              icon={Settings}
               active={section === 'general'}
               onClick={() => setSection('general')}
             />
             <MenuItem
               label="大模型设置"
+              icon={Bot}
               active={section === 'model'}
               onClick={() => setSection('model')}
             />
             <MenuItem
               label="SSH 快捷方式"
+              icon={Server}
               active={section === 'ssh'}
               onClick={() => setSection('ssh')}
             />
@@ -68,10 +72,12 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
 
 function MenuItem({
   label,
+  icon: Icon,
   active,
   onClick,
 }: {
   label: string;
+  icon: LucideIcon;
   active: boolean;
   onClick: () => void;
 }) {
@@ -81,12 +87,16 @@ function MenuItem({
       className="terminal-item"
       style={{
         margin: '2px 8px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
         color: active ? 'var(--color-accent)' : 'var(--color-text-primary)',
         textTransform: 'none',
         letterSpacing: 0,
         fontWeight: active ? 600 : 400,
       }}
     >
+      <Icon size={15} strokeWidth={1.75} style={{ flexShrink: 0 }} />
       <span>{label}</span>
     </div>
   );
@@ -194,7 +204,163 @@ function GeneralSettings() {
           </div>
         </div>
       </div>
+
+      <SocksProxySection />
     </div>
+  );
+}
+
+/** SOCKS5 proxy config (需求 3). Persists to settings + rebuilds the live
+ * HTTP client via `proxy_reload`. Applies to AI and HTTP traffic
+ * independently, and bypasses localhost/LAN automatically. */
+function SocksProxySection() {
+  const [cfg, setCfg] = useState<ProxyConfig>({ socksUrl: '', applyAi: true, applyHttp: true });
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadProxyConfig()
+      .then((c) => {
+        if (!cancelled) {
+          setCfg(c);
+          setLoaded(true);
+        }
+      })
+      .catch(() => setLoaded(true));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaved(false);
+    try {
+      await saveProxyConfig(cfg);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const labelStyle: React.CSSProperties = {
+    fontSize: 12,
+    fontWeight: 500,
+    color: 'var(--color-text-secondary)',
+    marginBottom: 6,
+    display: 'block',
+  };
+  const hintStyle: React.CSSProperties = {
+    fontSize: 11,
+    color: 'var(--color-text-muted)',
+    marginTop: 4,
+  };
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    padding: '8px 10px',
+    borderRadius: 6,
+    border: '1px solid var(--color-border)',
+    backgroundColor: 'var(--color-bg-primary)',
+    color: 'var(--color-text-primary)',
+    fontSize: 13,
+    outline: 'none',
+  };
+
+  return (
+    <>
+      <div style={{ height: 1, backgroundColor: 'var(--color-border)', margin: '12px 0' }} />
+      <h2
+        style={{
+          fontSize: 14,
+          fontWeight: 600,
+          margin: '0 0 4px',
+          color: 'var(--color-text-primary)',
+        }}
+      >
+        SOCKS 代理
+      </h2>
+      <p style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 16 }}>
+        设置 SOCKS5 代理后，所有流量都走代理（内网 localhost/私有 IP 自动绕过）。可单独控制下方两类流量。
+      </p>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div>
+          <label style={labelStyle}>代理地址</label>
+          <input
+            type="text"
+            value={cfg.socksUrl}
+            onChange={(e) => setCfg((c) => ({ ...c, socksUrl: e.target.value }))}
+            placeholder="socks5://127.0.0.1:1080"
+            disabled={!loaded}
+            style={inputStyle}
+          />
+          <div style={hintStyle}>
+            留空 = 直连。支持 <code>socks5://</code> 与 <code>socks5h://</code>（后者由代理解析 DNS）。
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <ProxyCheckbox
+            label="AI 流量走代理"
+            checked={cfg.applyAi}
+            onChange={(v) => setCfg((c) => ({ ...c, applyAi: v }))}
+          />
+          <ProxyCheckbox
+            label="HTTP 流量走代理"
+            checked={cfg.applyHttp}
+            onChange={(v) => setCfg((c) => ({ ...c, applyHttp: v }))}
+          />
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <button
+            className="btn btn-primary"
+            onClick={handleSave}
+            disabled={saving || !loaded}
+          >
+            {saving ? '保存中…' : '保存并应用'}
+          </button>
+          {saved && (
+            <span style={{ fontSize: 12, color: 'var(--color-success)' }}>✓ 已应用</span>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function ProxyCheckbox({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <label
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        cursor: 'pointer',
+        fontSize: 13,
+        color: 'var(--color-text-primary)',
+        userSelect: 'none',
+      }}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        style={{ width: 15, height: 15, accentColor: 'var(--color-accent)' }}
+      />
+      {label}
+    </label>
   );
 }
 

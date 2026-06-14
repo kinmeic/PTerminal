@@ -1,3 +1,4 @@
+use crate::ai::client::{self, ProxyConfig};
 use crate::db::DbPool;
 use portable_pty::{Child, MasterPty, PtySize};
 use std::collections::HashMap;
@@ -56,7 +57,12 @@ pub struct AppState {
     /// Shared HTTP client for AI requests. reqwest::Client is cheap to clone
     /// (internal Arc) and reuses connection pools / TLS sessions, so we build
     /// one per app lifetime instead of per request.
-    pub http: reqwest::Client,
+    ///
+    /// Wrapped in `RwLock` so the user can change SOCKS proxy settings at
+    /// runtime (`rebuild_http`) and swap the client without restarting the
+    /// app. In-flight requests keep using the old client (it's internally
+    /// `Arc`-refcounted); new requests pick up the new one.
+    pub http: Arc<RwLock<reqwest::Client>>,
     /// Cancellation tokens for in-flight AI streams, keyed by request_id
     /// (supplied by the frontend). The frontend calls `ai_cancel(requestId)`
     /// to abort a running stream; `run_stream` inserts on start and removes on
@@ -67,11 +73,28 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(db: DbPool) -> Self {
+        let proxy = client::load_proxy_config(&db);
         Self {
             db,
             sessions: Arc::new(RwLock::new(HashMap::new())),
-            http: crate::ai::client::build_client(),
+            http: Arc::new(RwLock::new(client::build_client(&proxy))),
             cancels: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Rebuild the HTTP client from the current proxy settings in the DB and
+    /// swap it in atomically. Called by the `proxy_reload` command after the
+    /// frontend persists new SOCKS settings. In-flight requests keep using the
+    /// previous client (it is `Arc`-shared by the requests holding it); new
+    /// requests pick up the rebuilt one on the next clone.
+    pub fn rebuild_http(&self, proxy: &ProxyConfig) {
+        let new_client = client::build_client(proxy);
+        match self.http.write() {
+            Ok(mut guard) => *guard = new_client,
+            Err(poisoned) => {
+                log::error!("http lock poisoned — recovering");
+                *poisoned.into_inner() = new_client;
+            }
         }
     }
 

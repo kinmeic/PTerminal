@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 
 interface ResizerProps {
   onResize: (delta: number) => void;
+  /** Called once when a drag ends (mouseup). Use to persist width, etc. */
+  onResizeEnd?: () => void;
   direction?: 'horizontal' | 'vertical';
 }
 
-export function Resizer({ onResize, direction = 'horizontal' }: ResizerProps) {
+export function Resizer({ onResize, onResizeEnd, direction = 'horizontal' }: ResizerProps) {
   const [isResizing, setIsResizing] = useState(false);
 
   // Stable handlers bound on mousedown — read `onResize` from a ref so the
@@ -29,6 +31,7 @@ export function Resizer({ onResize, direction = 'horizontal' }: ResizerProps) {
       setIsResizing(false);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
+      onResizeEnd?.();
     };
 
     document.body.style.cursor =
@@ -40,7 +43,7 @@ export function Resizer({ onResize, direction = 'horizontal' }: ResizerProps) {
       document.removeEventListener('mousemove', handleMove);
       document.removeEventListener('mouseup', handleUp);
     };
-  }, [isResizing, direction, onResize]);
+  }, [isResizing, direction, onResize, onResizeEnd]);
 
   // Cleanup body styles on unmount as a safety net.
   useEffect(() => {

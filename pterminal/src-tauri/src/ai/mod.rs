@@ -25,7 +25,9 @@ impl Provider {
             "openai" => Some(Provider::OpenAI),
             "anthropic" | "claude" => Some(Provider::Anthropic),
             // ollama + other OpenAI-compatible endpoints use the OpenAI path
-            "ollama" | "openai-compatible" | "custom" => Some(Provider::OpenAI),
+            "ollama" | "deepseek" | "moonshot" | "openai-compatible" | "custom" => {
+                Some(Provider::OpenAI)
+            }
             _ => None,
         }
     }
@@ -34,6 +36,9 @@ impl Provider {
 /// Resolved AI configuration loaded from the `settings` table.
 #[derive(Debug, Clone)]
 pub struct AiConfig {
+    /// Raw provider id saved by the UI (e.g. openai, ollama, deepseek).
+    /// `provider` below is the protocol family used for requests.
+    pub provider_id: String,
     pub provider: Provider,
     pub api_key: Option<String>,
     pub model: String,
@@ -58,35 +63,23 @@ pub fn load_config(db: &DbPool) -> AiConfig {
         })
     };
 
-    let provider_str = get("ai_provider").unwrap_or_else(|| "ollama".to_string());
+    let provider_str = get("ai_provider")
+        .unwrap_or_else(|| "ollama".to_string())
+        .trim()
+        .to_ascii_lowercase();
     let provider = Provider::from_str(&provider_str).unwrap_or(Provider::OpenAI);
     let api_key = get("ai_api_key");
-    let model = get("ai_model").unwrap_or_else(|| {
-        if provider == Provider::Anthropic {
-            "claude-3-5-sonnet-latest".to_string()
-        } else if provider_str == "ollama" {
-            "llama3.2".to_string()
-        } else {
-            "gpt-4o-mini".to_string()
-        }
-    });
-    let base_url = get("ai_base_url").unwrap_or_else(|| {
-        match provider {
-            Provider::Anthropic => "https://api.anthropic.com".to_string(),
-            Provider::OpenAI => {
-                if provider_str == "ollama" {
-                    "http://localhost:11434".to_string()
-                } else {
-                    "https://api.openai.com".to_string()
-                }
-            }
-        }
+    let model = get("ai_model").unwrap_or_else(|| default_model(&provider_str, provider));
+    let base_url = get("ai_base_url").unwrap_or_else(|| match provider {
+        Provider::Anthropic => "https://api.anthropic.com".to_string(),
+        Provider::OpenAI => default_base_url(&provider_str).to_string(),
     });
     let terminal_context_lines = get("ai_terminal_context_lines")
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or(50);
 
     AiConfig {
+        provider_id: provider_str,
         provider,
         api_key,
         model,
@@ -133,4 +126,23 @@ pub struct AiConfigSettings {
     pub model: Option<String>,
     pub base_url: Option<String>,
     pub terminal_context_lines: Option<u32>,
+}
+
+fn default_model(provider: &str, protocol: Provider) -> String {
+    match provider {
+        "ollama" => "llama3.2".to_string(),
+        "deepseek" => "deepseek-chat".to_string(),
+        "moonshot" => "moonshot-v1-8k".to_string(),
+        _ if protocol == Provider::Anthropic => "claude-3-5-sonnet-latest".to_string(),
+        _ => "gpt-4o-mini".to_string(),
+    }
+}
+
+fn default_base_url(provider: &str) -> &'static str {
+    match provider {
+        "ollama" => "http://localhost:11434",
+        "deepseek" => "https://api.deepseek.com",
+        "moonshot" => "https://api.moonshot.cn",
+        _ => "https://api.openai.com",
+    }
 }
