@@ -1,9 +1,14 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { useAppStore } from '@/stores/appStore';
 import { CommonCommands } from '@/components/commands/CommonCommands';
-import { AIChatPanel } from '@/components/ai/AIChatPanel';
 
 type Tab = 'commands' | 'ai';
+
+const AIChatPanel = lazy(() =>
+  import('@/components/ai/AIChatPanel').then((mod) => ({
+    default: mod.AIChatPanel,
+  }))
+);
 
 export function RightPanel() {
   const activeTerminalId = useAppStore((s) => s.activeTerminalId);
@@ -45,7 +50,9 @@ export function RightPanel() {
         tab === 'ai' ? (
           // AI chat fills the full panel height (its own internal scrolling).
           <div className="flex-1 min-h-0">
-            <AIChatPanel />
+            <Suspense fallback={null}>
+              <AIChatPanel />
+            </Suspense>
           </div>
         ) : (
           <div className="flex-1 overflow-y-auto">

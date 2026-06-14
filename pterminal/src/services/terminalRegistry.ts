@@ -7,6 +7,9 @@ interface TerminalEntry {
   fit: FitAddon;
   /** Buffer of PTY data received while the terminal is detached/unmounted. */
   pending: string[];
+  /** Output queued for the next animation frame while the terminal is mounted. */
+  writeQueue: string;
+  writeRaf: number;
   /** Whether the onData → PTY writer binding has already been attached. */
   inputBound: boolean;
 }
@@ -46,7 +49,7 @@ class TerminalRegistry {
     term.loadAddon(fit);
     term.loadAddon(new WebLinksAddon());
 
-    entry = { term, fit, pending: [], inputBound: false };
+    entry = { term, fit, pending: [], writeQueue: '', writeRaf: 0, inputBound: false };
     this.entries.set(id, entry);
     return term;
   }
@@ -72,8 +75,9 @@ class TerminalRegistry {
     }
     // Flush buffered output captured while detached.
     if (entry.pending.length > 0) {
-      for (const chunk of entry.pending) entry.term.write(chunk);
+      entry.writeQueue += entry.pending.join('');
       entry.pending = [];
+      this.flushWrite(entry);
     }
     return entry.fit;
   }
@@ -83,7 +87,13 @@ class TerminalRegistry {
     const entry = this.entries.get(id);
     if (!entry) return;
     if (entry.term.element) {
-      entry.term.write(data);
+      entry.writeQueue += data;
+      if (!entry.writeRaf) {
+        entry.writeRaf = requestAnimationFrame(() => {
+          entry.writeRaf = 0;
+          this.flushWrite(entry);
+        });
+      }
     } else {
       entry.pending.push(data);
     }
@@ -175,10 +185,19 @@ class TerminalRegistry {
     this.entries.get(id)?.term.focus();
   }
 
+  containsPoint(id: string, x: number, y: number): boolean {
+    const entry = this.entries.get(id);
+    const el = entry?.term.element?.parentElement;
+    if (!el) return false;
+    const rect = el.getBoundingClientRect();
+    return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+  }
+
   /** Dispose the xterm instance and release resources. */
   dispose(id: string): void {
     const entry = this.entries.get(id);
     if (!entry) return;
+    if (entry.writeRaf) cancelAnimationFrame(entry.writeRaf);
     entry.term.dispose();
     this.entries.delete(id);
   }
@@ -217,6 +236,14 @@ class TerminalRegistry {
     entry.term.options.fontFamily = fontFamily;
     entry.term.options.fontSize = fontSize;
     this.fit(id);
+  }
+
+  private flushWrite(entry: TerminalEntry): void {
+    const chunk = entry.writeQueue;
+    entry.writeQueue = '';
+    if (!chunk) return;
+    if (entry.term.element) entry.term.write(chunk);
+    else entry.pending.push(chunk);
   }
 }
 

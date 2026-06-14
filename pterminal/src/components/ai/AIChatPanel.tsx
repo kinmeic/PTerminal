@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Send, Square } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { aiService } from '@/services/aiService';
@@ -17,6 +17,7 @@ export function AIChatPanel() {
   const aiMessagesTotal = useAppStore((s) => s.aiMessagesTotal);
   const loadAiMessages = useAppStore((s) => s.loadAiMessages);
   const aiConfig = useAppStore((s) => s.aiConfig);
+  const runSuggestedCommand = useAppStore((s) => s.runSuggestedCommand);
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -112,7 +113,12 @@ export function AIChatPanel() {
               </div>
             )}
             {aiMessages.map((msg, idx) => (
-              <MessageBubble key={msg.id ?? idx} message={msg} />
+              <MessageBubble
+                key={msg.id ?? idx}
+                message={msg}
+                activeTerminalId={activeTerminalId}
+                runSuggestedCommand={runSuggestedCommand}
+              />
             ))}
           </>
         )}
@@ -161,20 +167,29 @@ export function AIChatPanel() {
   );
 }
 
-function MessageBubble({ message }: { message: AIMessage }) {
+const MessageBubble = memo(function MessageBubble({
+  message,
+  activeTerminalId,
+  runSuggestedCommand,
+}: {
+  message: AIMessage;
+  activeTerminalId: string | null;
+  runSuggestedCommand: (terminalId: string, command: string) => Promise<void>;
+}) {
   const isUser = message.role === 'user';
-  const runSuggestedCommand = useAppStore((s) => s.runSuggestedCommand);
-  const activeTerminalId = useAppStore((s) => s.activeTerminalId);
 
   // Strip <think>…</think> reasoning blocks from the displayed text. Some
   // providers (DeepSeek, Qwen, etc.) stream hidden chain-of-thought wrapped in
   // these tags; we never want it in the chat bubble. Also hides an in-progress,
   // not-yet-closed <think> block so partial reasoning doesn't flash by while
   // streaming. User messages are left untouched.
-  const displayContent = isUser ? message.content : stripThinkBlocks(message.content);
+  const displayContent = useMemo(
+    () => (isUser ? message.content : stripThinkBlocks(message.content)),
+    [isUser, message.content]
+  );
   // Extract fenced ```sh blocks from the filtered text so a command inside a
   // think block is never offered as runnable.
-  const codeBlocks = extractCodeBlocks(displayContent);
+  const codeBlocks = useMemo(() => extractCodeBlocks(displayContent), [displayContent]);
 
   return (
     <div className={`ai-msg ${isUser ? 'ai-msg-user' : 'ai-msg-assistant'}`}>
@@ -200,7 +215,7 @@ function MessageBubble({ message }: { message: AIMessage }) {
       )}
     </div>
   );
-}
+});
 
 /**
  * Remove `<think>…</think>` reasoning blocks from provider output.

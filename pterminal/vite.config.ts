@@ -19,4 +19,18 @@ export default defineConfig({
       ignored: ["**/src-tauri/**"],
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('/react/') || id.includes('/react-dom/')) return 'react'
+          if (id.includes('/@tauri-apps/')) return 'tauri'
+          if (id.includes('/@xterm/')) return 'terminal'
+          if (id.includes('/lucide-react/')) return 'icons'
+          return 'vendor'
+        },
+      },
+    },
+  },
 })

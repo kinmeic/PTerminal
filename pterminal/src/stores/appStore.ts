@@ -140,9 +140,7 @@ const DEFAULT_RIGHT_WIDTH = 320;
 function applyTheme(isDark: boolean) {
   document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
   requestAnimationFrame(() => {
-    import('@/services/terminalRegistry').then(({ terminalRegistry }) =>
-      terminalRegistry.rethemeAll()
-    );
+    terminalRegistry.rethemeAll();
   });
 }
 

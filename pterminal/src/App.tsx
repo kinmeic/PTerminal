@@ -1,6 +1,5 @@
-import { useEffect, useRef } from 'react';
+import { lazy, Suspense, useEffect, useRef } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
-import { SettingsPage } from '@/components/settings/SettingsPage';
 import { Toaster } from '@/components/Toaster';
 import { useTauriEvents } from '@/hooks/useTauriEvents';
 import { useAIStream } from '@/hooks/useAIStream';
@@ -8,6 +7,12 @@ import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useAppStore } from '@/stores/appStore';
 import { terminalRegistry } from '@/services/terminalRegistry';
 import { terminalService } from '@/services/terminalService';
+
+const SettingsPage = lazy(() =>
+  import('@/components/settings/SettingsPage').then((mod) => ({
+    default: mod.SettingsPage,
+  }))
+);
 
 function App() {
   // Wire up the global Tauri event listeners (terminal-data / exit).
@@ -52,15 +57,16 @@ function App() {
 
   return (
     <>
-      {/* Both views stay mounted (toggled via CSS) so switching to settings
-          and back never unmounts AppLayout — which would otherwise detach and
-          re-attach every xterm.js instance, losing terminal scrollback. */}
+      {/* AppLayout stays mounted while settings is shown, so switching back never
+          detaches xterm.js instances or loses terminal scrollback. */}
       <div style={{ display: activeView === 'settings' ? 'none' : 'contents' }}>
         <AppLayout />
       </div>
-      <div style={{ display: activeView === 'settings' ? 'contents' : 'none' }}>
-        <SettingsPage onBack={() => setActiveView('terminal')} />
-      </div>
+      {activeView === 'settings' && (
+        <Suspense fallback={null}>
+          <SettingsPage onBack={() => setActiveView('terminal')} />
+        </Suspense>
+      )}
       <Toaster />
     </>
   );

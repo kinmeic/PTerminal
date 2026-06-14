@@ -10,11 +10,17 @@ use std::io::Read;
 use std::os::unix::io::RawFd;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
 
 const DEFAULT_COLS: u16 = 80;
 const DEFAULT_ROWS: u16 = 24;
 const READ_BUF_SIZE: usize = 8 * 1024;
+/// Coalesce PTY output before crossing the Tauri event boundary. A one-frame
+/// window keeps interactive output feeling immediate while reducing IPC pressure
+/// for commands that print many small chunks.
+const OUTPUT_FLUSH_INTERVAL: Duration = Duration::from_millis(16);
+const OUTPUT_FLUSH_BYTES: usize = 64 * 1024;
 /// How long `poll()` blocks waiting for PTY output before the reader thread
 /// wakes up to re-check the cancellation flag (H6). 2s keeps the thread
 /// responsive to `terminal_kill` without busy-spinning.
@@ -162,6 +168,8 @@ pub fn terminal_spawn(
         // boundaries. Without this, a multi-byte char (CJK, emoji) split
         // across two reads would be corrupted into replacement characters.
         let mut leftover: Vec<u8> = Vec::new();
+        let mut pending_output = String::new();
+        let mut output_deadline: Option<Instant> = None;
         // dup the poll fd into the thread's ownership so closing it on exit
         // never touches the session's master fd.
         let owned_poll_fd = unsafe { libc::dup(poll_fd) };
@@ -175,13 +183,20 @@ pub fn terminal_spawn(
             // Check cancellation first — a kill sets this flag and we want to
             // exit within one poll cycle even if the child is hung.
             if reader_cancel.load(Ordering::Acquire) {
+                emit_terminal_data(&app_handle, &term_id, &mut pending_output);
                 break;
+            }
+            if output_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                emit_terminal_data(&app_handle, &term_id, &mut pending_output);
+                output_deadline = None;
+                continue;
             }
             // Wait up to READ_POLL_TIMEOUT_MS for output, then loop back so the
             // cancel check runs periodically. This replaces the old indefinite
             // `reader.read()` block that could wedge the thread forever when a
             // child process hung without exiting.
-            let nready = unsafe { libc::poll(pollfds.as_mut_ptr(), 1, READ_POLL_TIMEOUT_MS) };
+            let timeout = poll_timeout_until(output_deadline);
+            let nready = unsafe { libc::poll(pollfds.as_mut_ptr(), 1, timeout) };
             if nready < 0 {
                 let e = std::io::Error::last_os_error();
                 // EINTR just means a signal interrupted poll — retry the loop.
@@ -191,7 +206,12 @@ pub fn terminal_spawn(
                 break;
             }
             if nready == 0 {
-                // Timed out with no data; loop back to re-check cancellation.
+                // Timed out with no data; flush a queued output batch if this
+                // was the short coalescing deadline, then re-check cancellation.
+                if !pending_output.is_empty() {
+                    emit_terminal_data(&app_handle, &term_id, &mut pending_output);
+                    output_deadline = None;
+                }
                 continue;
             }
             // poll reported readable (POLLIN) or hangup (POLLHUP). On POLLHUP
@@ -205,13 +225,14 @@ pub fn terminal_spawn(
                     let (ready, rest) = leftover.split_at(complete_len);
                     let data = String::from_utf8_lossy(ready).into_owned();
                     if !data.is_empty() {
-                        let _ = app_handle.emit(
-                            "terminal-data",
-                            TerminalDataPayload {
-                                id: term_id.clone(),
-                                data,
-                            },
-                        );
+                        if pending_output.is_empty() {
+                            output_deadline = Some(Instant::now() + OUTPUT_FLUSH_INTERVAL);
+                        }
+                        pending_output.push_str(&data);
+                        if pending_output.len() >= OUTPUT_FLUSH_BYTES {
+                            emit_terminal_data(&app_handle, &term_id, &mut pending_output);
+                            output_deadline = None;
+                        }
                     }
                     leftover = rest.to_vec();
                 }
@@ -227,15 +248,10 @@ pub fn terminal_spawn(
         if !leftover.is_empty() {
             let data = String::from_utf8_lossy(&leftover).into_owned();
             if !data.is_empty() {
-                let _ = app_handle.emit(
-                    "terminal-data",
-                    TerminalDataPayload {
-                        id: term_id.clone(),
-                        data,
-                    },
-                );
+                pending_output.push_str(&data);
             }
         }
+        emit_terminal_data(&app_handle, &term_id, &mut pending_output);
         // Child has exited (EOF on master reader). Emit before removing the
         // session so the frontend's `terminal-exit` handler (which calls
         // `terminal_delete`) can still find/identify the terminal.
@@ -550,6 +566,32 @@ fn new_terminal_name(state: &AppState) -> String {
         })
         .unwrap_or(1);
     format!("Terminal {seq}")
+}
+
+fn poll_timeout_until(deadline: Option<Instant>) -> libc::c_int {
+    let Some(deadline) = deadline else {
+        return READ_POLL_TIMEOUT_MS;
+    };
+    let now = Instant::now();
+    if deadline <= now {
+        return 0;
+    }
+    let ms = deadline.duration_since(now).as_millis();
+    ms.min(READ_POLL_TIMEOUT_MS as u128).max(1) as libc::c_int
+}
+
+fn emit_terminal_data(app: &AppHandle, term_id: &str, pending: &mut String) {
+    if pending.is_empty() {
+        return;
+    }
+    let data = std::mem::take(pending);
+    let _ = app.emit(
+        "terminal-data",
+        TerminalDataPayload {
+            id: term_id.to_string(),
+            data,
+        },
+    );
 }
 
 /// Return the length of the longest complete UTF-8 prefix of `bytes`.
