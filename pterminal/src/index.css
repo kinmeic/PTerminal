@@ -1,0 +1,683 @@
+@import "tailwindcss";
+
+@theme {
+  --font-mono: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', 'Consolas', monospace;
+  /* App body font also defaults to SF Mono so the terminal feel is consistent */
+  --font-sans: 'SF Mono', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  
+  /* Dark theme (default) */
+  --color-bg-primary: #0d1117;
+  --color-bg-secondary: #161b22;
+  --color-bg-tertiary: #21262d;
+  --color-border: #3C3C3C;
+  --color-text-primary: #c9d1d9;
+  --color-text-secondary: #8b949e;
+  --color-text-muted: #6e7681;
+  --color-accent: #58a6ff;
+  --color-accent-hover: #79b8ff;
+  --color-danger: #f85149;
+  --color-success: #3fb950;
+  --color-warning: #d29922;
+
+  /* Per-column backgrounds — dark theme */
+  --color-sidebar-left: #3C3C3C;
+  --color-sidebar-center: #161616;
+  --color-sidebar-right: #161616;
+  
+  /* Terminal colors */
+  --color-terminal-bg: #161616;
+  --color-terminal-fg: #c9d1d9;
+  --color-terminal-cursor: #58a6ff;
+  --color-terminal-selection: #264f78;
+  --color-terminal-black: #484f58;
+  --color-terminal-red: #ff7b72;
+  --color-terminal-green: #3fb950;
+  --color-terminal-yellow: #d29922;
+  --color-terminal-blue: #58a6ff;
+  --color-terminal-magenta: #bc8cff;
+  --color-terminal-cyan: #39c5cf;
+  --color-terminal-white: #b1bac4;
+}
+
+/* Light theme overrides */
+[data-theme="light"] {
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #f6f8fa;
+  --color-bg-tertiary: #eaeef2;
+  --color-border: #d0d7de;
+  --color-text-primary: #1f2328;
+  --color-text-secondary: #656d76;
+  --color-text-muted: #8c959f;
+  --color-accent: #0969da;
+  --color-accent-hover: #0550ae;
+  --color-danger: #cf222e;
+  --color-success: #1a7f37;
+  --color-warning: #9a6700;
+
+  /* Per-column backgrounds — light theme */
+  --color-sidebar-left: #F2F2F1;
+  --color-sidebar-center: #F8F8F8;
+  --color-sidebar-right: #F8F8F8;
+  
+  --color-terminal-bg: #F8F8F8;
+  --color-terminal-fg: #1f2328;
+  --color-terminal-cursor: #0969da;
+  --color-terminal-selection: #b4d7ff;
+  --color-terminal-black: #6e7781;
+  --color-terminal-red: #cf222e;
+  --color-terminal-green: #1a7f37;
+  --color-terminal-yellow: #9a6700;
+  --color-terminal-blue: #0969da;
+  --color-terminal-magenta: #8250df;
+  --color-terminal-cyan: #1b7c83;
+  --color-terminal-white: #8c959f;
+}
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Top bar — replaces the native title bar (Overlay style). Spans the whole
+   window width, draggable, with the macOS traffic lights floating over its
+   left side (positioned via tauri.conf.json trafficLightPosition). */
+:root {
+  --toolbar-height: 38px;
+}
+
+.topbar {
+  height: var(--toolbar-height);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px 0 84px; /* left 84px reserves room for traffic lights */
+  background-color: var(--color-sidebar-left);
+  border-bottom: 1px solid var(--color-border);
+  user-select: none;
+  cursor: default;
+}
+
+.topbar-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.topbar-subtitle {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-weight: 400;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.topbar-btn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.topbar-btn:hover {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+/* Active state for toggle buttons (e.g. drawer toggles when the panel is open):
+   gives the user clear feedback that clicking again will collapse the panel. */
+.topbar-btn.active {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.topbar-btn.active:hover {
+  background-color: var(--color-border);
+}
+
+/* Zoom percentage label in the top bar: clickable (resets to 100%), fixed
+   width so digit changes don't shift the layout. */
+.topbar-zoom-label {
+  min-width: 42px;
+  height: 24px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.topbar-zoom-label:hover {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-sidebar-center);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* Resizer handle */
+.resizer {
+  position: relative;
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.15s;
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+/* Invisible hit area: keeps the visible 4px bar but widens the grabbable
+   zone to ~12px so the handle is easy to land on in a Tauri window.
+   Without `position: relative` on .resizer, z-index was a no-op and the
+   4px bar was nearly impossible to grab — which made panels feel like they
+   "snap back" when dragged. */
+.resizer::before {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline: -4px;
+  z-index: -1;
+}
+
+.resizer:hover,
+.resizer.resizing {
+  background: var(--color-accent);
+}
+
+/* Panel base — transparent so the wrapping container's background shows
+   through. AppLayout wraps each column (panel-sidebar / center) with the
+   correct sidebar color; if .panel set its own background it would mask it. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: 100%;
+  background-color: transparent;
+}
+
+/* Side panels (left/right) get a subtly different background so they read as
+   distinct regions from the central terminal column. */
+.panel-sidebar {
+  background-color: var(--color-sidebar-left);
+  border-right: 1px solid var(--color-border);
+}
+
+.panel-sidebar-right {
+  background-color: var(--color-sidebar-right);
+  border-right: none;
+  border-left: 1px solid var(--color-border);
+}
+
+/* Unified header bar: fixed height, flex centering, consistent across all
+   three columns so the tops align perfectly. */
+.panel-header {
+  height: 36px;
+  padding: 0 8px 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+/* Collapsed rail: a thin vertical strip that replaces a side panel when
+   collapsed, offering a click target to expand it again. */
+.panel-rail {
+  width: 28px;
+  flex-shrink: 0;
+  background-color: var(--color-sidebar-left);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 4px;
+  border-right: 1px solid var(--color-border);
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.panel-rail-right {
+  background-color: var(--color-sidebar-right);
+  border-right: none;
+  border-left: 1px solid var(--color-border);
+}
+
+.panel-rail:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+.rail-button {
+  width: 24px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.rail-button:hover {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+/* Collapse/expand button that sits inside a panel header */
+.collapse-button {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+
+.collapse-button:hover {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+/* Terminal list item */
+.terminal-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  border-radius: 6px;
+  margin: 2px 8px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background 0.15s;
+}
+
+.terminal-item:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+.terminal-item.active {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-accent);
+}
+
+/* SSH shortcut row — mirrors .terminal-item layout but holds two text lines */
+.ssh-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  border-radius: 6px;
+  margin: 2px 8px;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background 0.15s;
+}
+
+.ssh-item:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+/* Button styles */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  border: none;
+  outline: none;
+}
+
+.btn-primary {
+  background-color: var(--color-accent);
+  color: white;
+}
+
+.btn-primary:hover {
+  background-color: var(--color-accent-hover);
+}
+
+.btn-secondary {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.btn-secondary:hover {
+  background-color: var(--color-border);
+}
+
+.btn-icon {
+  padding: 4px;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+
+.btn-icon:hover {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+/* xterm.js integration */
+.xterm-viewport {
+  background-color: var(--color-terminal-bg) !important;
+}
+
+.xterm-screen {
+  background-color: var(--color-terminal-bg) !important;
+}
+
+/* AI chat — standard chat layout (scrollable message list + bottom composer) */
+.ai-chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.ai-chat-messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+
+.ai-chat-empty {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+  padding: 16px 4px;
+}
+
+/* Hint shown when older messages are truncated by the page size */
+.ai-chat-truncated {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  text-align: center;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  border: 1px dashed var(--color-border);
+  border-radius: 6px;
+  background-color: var(--color-bg-secondary);
+}
+
+.ai-chat-composer {
+  flex-shrink: 0;
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--color-border);
+  background-color: var(--color-bg-secondary);
+}
+
+.ai-chat-composer input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: 12px;
+  outline: none;
+}
+
+.ai-chat-composer input:focus {
+  border-color: var(--color-accent);
+}
+
+.ai-chat-send {
+  padding: 6px 10px;
+  flex-shrink: 0;
+}
+
+.ai-empty {
+  padding: 32px 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+/* Message bubbles */
+.ai-msg {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.ai-msg-user {
+  align-items: flex-end;
+}
+
+.ai-msg-bubble {
+  max-width: 92%;
+  padding: 7px 11px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ai-msg-user .ai-msg-bubble {
+  background-color: var(--color-accent);
+  color: #fff;
+  border-bottom-right-radius: 3px;
+}
+
+.ai-msg-assistant .ai-msg-bubble {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  border-bottom-left-radius: 3px;
+}
+
+.ai-msg-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+  width: 100%;
+}
+
+.ai-code-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+}
+
+.ai-code-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-primary);
+}
+
+/* Unified form field: makes <select> render like <input> by hiding the native
+   arrow and drawing a consistent chevron, so the two controls line up. */
+.field-wrap {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.field-wrap > .field-chevron {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--color-text-secondary);
+  display: inline-flex;
+}
+
+.field-select {
+  width: 100%;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding: 8px 32px 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.field-select:focus {
+  border-color: var(--color-accent);
+}
+
+.field-select option {
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+}
+
+/* Context menu (right-click) — used by the terminal list */
+/* Invisible full-screen layer that sits behind a context menu and captures
+   outside clicks / right-clicks so the menu closes reliably. It must have a
+   z-index below the menu but above everything else. */
+.context-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1999;
+  /* transparent, but needs to receive pointer events */
+  background-color: transparent;
+}
+
+.context-menu {
+  position: fixed;
+  z-index: 2000;
+  min-width: 160px;
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background-color: var(--color-bg-secondary);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  user-select: none;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  border-radius: 5px;
+  color: var(--color-text-primary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.context-menu-item:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+.context-menu-item.danger {
+  color: var(--color-danger);
+}
+
+.context-menu-item.danger:hover {
+  background-color: var(--color-danger);
+  color: #fff;
+}
+
+.context-menu-divider {
+  height: 1px;
+  margin: 4px 6px;
+  background-color: var(--color-border);
+}
+
+/* Inline rename input inside a terminal row */
+.terminal-rename-input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--color-accent);
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  outline: none;
+}
