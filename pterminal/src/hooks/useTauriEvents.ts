@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { terminalRegistry } from '@/services/terminalRegistry';
+import { useAppStore } from '@/stores/appStore';
 import type {
   TerminalDataPayload,
   TerminalExitPayload,
@@ -9,7 +10,7 @@ import type {
 /**
  * Subscribe to the global Tauri events emitted by the Rust backend:
  *  - `terminal-data`: PTY output, routed to the right xterm instance.
- *  - `terminal-exit`: shell exited → log only.
+ *  - `terminal-exit`: shell exited → remove the terminal (sidebar/store/DB).
  *
  * Mounted once at the app root.
  */
@@ -22,8 +23,8 @@ export function useTauriEvents(): void {
     }).then((un) => unlisteners.push(un));
 
     listen<TerminalExitPayload>('terminal-exit', (event) => {
-      // Shell process exited; terminal stays in the list for review.
-      console.log('terminal-exit', event.payload.id);
+      // Shell process exited (user typed `exit`, etc.) — close the terminal.
+      useAppStore.getState().handleTerminalExit(event.payload.id);
     }).then((un) => unlisteners.push(un));
 
     return () => {

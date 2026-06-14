@@ -139,6 +139,11 @@ pub fn terminal_spawn(
     // Spawn the reader thread that forwards PTY output to the frontend.
     let app_handle = app.clone();
     let term_id = id.clone();
+    // Clone the AppState so the reader thread can remove the session from the
+    // map when the child exits naturally (otherwise the TerminalSession —
+    // master/writer/child handles — leaks in `sessions` forever and
+    // `terminal_has_session` keeps reporting true for a dead terminal).
+    let state_for_thread = state.inner().clone();
     std::thread::spawn(move || {
         let mut reader = reader;
         let mut buf = [0u8; READ_BUF_SIZE];
@@ -220,7 +225,9 @@ pub fn terminal_spawn(
                 );
             }
         }
-        // Child has exited (EOF on master reader).
+        // Child has exited (EOF on master reader). Emit before removing the
+        // session so the frontend's `terminal-exit` handler (which calls
+        // `terminal_delete`) can still find/identify the terminal.
         let _ = app_handle.emit(
             "terminal-exit",
             TerminalExitPayload {
@@ -228,6 +235,11 @@ pub fn terminal_spawn(
                 exit_code: None,
             },
         );
+        // Drop our handle to the session from the map so the master/writer/
+        // child resources are released. `remove_session` returns None when
+        // `terminal_delete` already removed it (manual delete path), in which
+        // case there's nothing to clean — the Arc is already gone.
+        state_for_thread.remove_session(&term_id);
     });
 
     // Mark this terminal active (so list reflects the focused one) and return

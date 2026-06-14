@@ -58,6 +58,10 @@ interface AppState {
   loadTerminals: () => Promise<void>;
   createTerminal: (opts?: { name?: string; cwd?: string }) => Promise<string | null>;
   deleteTerminal: (id: string) => Promise<void>;
+  /** Handle a shell that exited naturally (e.g. user typed `exit`). Removes
+   *  the terminal from the sidebar/store/DB. No-op if the terminal is already
+   *  gone (manual delete fires a duplicate `terminal-exit` after the kill). */
+  handleTerminalExit: (id: string) => void;
   renameTerminal: (id: string, name: string) => Promise<void>;
   /** Toggle the pinned state of a terminal and re-sort the list. */
   togglePinTerminal: (terminal: Terminal) => Promise<void>;
@@ -245,6 +249,15 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch (err) {
       toast.error('Failed to delete terminal'); console.error(err);
     }
+  },
+
+  handleTerminalExit: (id) => {
+    // Ghost-event guard: a manual delete (deleteTerminal → terminal_delete →
+    // kill child) also makes the reader emit terminal-exit, but by then the
+    // terminal is already removed from the store. Skip in that case to avoid
+    // a redundant remove/dispose on an absent id.
+    if (!get().terminals.some((t) => t.id === id)) return;
+    void get().deleteTerminal(id);
   },
 
   renameTerminal: async (id, name) => {
