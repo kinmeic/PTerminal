@@ -75,6 +75,17 @@ pub fn terminal_spawn(
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
+    // Ensure the shell's line editor uses a UTF-8 locale so multi-byte input
+    // (e.g. dragged non-ASCII filenames) is assembled correctly instead of
+    // being misread as separate keystrokes. Only set when the parent process
+    // didn't already provide one, so user/system prefs win. Placed before the
+    // `input.env` loop so a terminal's explicit env (including LANG) overrides.
+    if std::env::var("LANG").is_err() {
+        cmd.env("LANG", "en_US.UTF-8");
+    }
+    if std::env::var("LC_CTYPE").is_err() {
+        cmd.env("LC_CTYPE", "en_US.UTF-8");
+    }
     if let Some(env_map) = &input.env {
         for (k, v) in env_map {
             cmd.env(k, v);
