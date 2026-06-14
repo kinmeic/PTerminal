@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Send } from 'lucide-react';
+import { Send, Square } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { aiService } from '@/services/aiService';
 import { terminalRegistry } from '@/services/terminalRegistry';
@@ -19,6 +19,20 @@ export function AIChatPanel() {
   const aiConfig = useAppStore((s) => s.aiConfig);
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  /** Resize the textarea to fit its content, clamped to a max height (≈6 lines).
+   * Called on every input change and after the field is cleared on send. */
+  const autoResize = () => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  };
+
+  useEffect(() => {
+    autoResize();
+  }, [input]);
 
   // Load persisted chat history when switching terminals.
   useEffect(() => {
@@ -45,6 +59,9 @@ export function AIChatPanel() {
     const text = input.trim();
     setInput('');
 
+    // Generate a request id so the user can cancel this turn mid-stream.
+    const requestId = crypto.randomUUID();
+
     // Build recent history for context (last ~8 turns, excluding suggestions).
     const history = aiMessages
       .filter((m) => m.messageType === 'chat' || m.messageType === undefined)
@@ -59,17 +76,23 @@ export function AIChatPanel() {
         ? terminalRegistry.readTailLines(activeTerminalId, contextLines)
         : undefined;
 
-    useAppStore.getState().startAiTurn(activeTerminalId, text, 'chat');
+    useAppStore.getState().startAiTurn(activeTerminalId, text, 'chat', requestId);
     try {
       await aiService.chat({
         terminalId: activeTerminalId,
         message: text,
+        requestId,
         history,
         terminalContext: terminalContext || undefined,
       });
     } catch (err) {
       useAppStore.getState().finishAiTurn(String(err));
     }
+  };
+
+  const handleStop = () => {
+    const requestId = useAppStore.getState().activeAiRequestId;
+    if (requestId) void aiService.cancel(requestId);
   };
 
   return (
@@ -97,21 +120,42 @@ export function AIChatPanel() {
 
       {/* Composer — pinned to the bottom, full width. */}
       <form className="ai-chat-composer" onSubmit={handleSend}>
-        <input
-          type="text"
+        <textarea
+          ref={textareaRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask the assistant…"
+          onKeyDown={(e) => {
+            // Enter sends; Shift+Enter (and Ctrl/Cmd+Enter) inserts a newline.
+            if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+              e.preventDefault();
+              if (!isAiStreaming && input.trim()) {
+                void handleSend(e as unknown as React.FormEvent);
+              }
+            }
+          }}
+          placeholder="Ask the assistant…  (Shift+Enter for newline)"
+          rows={1}
           disabled={isAiStreaming}
         />
-        <button
-          type="submit"
-          className="btn btn-primary ai-chat-send"
-          disabled={isAiStreaming || !input.trim()}
-          title="Send"
-        >
-          <Send size={14} strokeWidth={1.75} />
-        </button>
+        {isAiStreaming ? (
+          <button
+            type="button"
+            className="btn btn-primary ai-chat-send"
+            onClick={handleStop}
+            title="Stop generating"
+          >
+            <Square size={13} fill="currentColor" strokeWidth={1.75} />
+          </button>
+        ) : (
+          <button
+            type="submit"
+            className="btn btn-primary ai-chat-send"
+            disabled={!input.trim()}
+            title="Send"
+          >
+            <Send size={14} strokeWidth={1.75} />
+          </button>
+        )}
       </form>
     </div>
   );

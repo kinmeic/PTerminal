@@ -20,9 +20,13 @@ interface TerminalViewProps {
 export function TerminalView({ terminalId }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   // Read the current terminal font so newly-created xterm instances pick it
-  // up at creation time (avoids a flash of the default font).
+  // up at creation time (avoids a flash of the default font). Per-terminal
+  // fontSize override takes precedence over the global default (N4).
+  const terminals = useAppStore((s) => s.terminals);
+  const terminal = terminals.find((t) => t.id === terminalId);
   const fontFamily = useAppStore((s) => s.fontFamily);
-  const fontSize = useAppStore((s) => s.fontSize);
+  const globalFontSize = useAppStore((s) => s.fontSize);
+  const fontSize = terminal?.fontSize ?? globalFontSize;
 
   useEffect(() => {
     const container = containerRef.current;

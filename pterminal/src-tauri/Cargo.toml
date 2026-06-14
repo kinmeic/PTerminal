@@ -34,8 +34,12 @@ r2d2_sqlite = "0.25"
 
 # Async runtime & HTTP for AI layer
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 reqwest = { version = "0.12", features = ["json", "stream"] }
 futures-util = "0.3"
+
+# Low-level fd flags for non-blocking PTY reads (H6 reader timeout)
+libc = "0.2"
 
 # Utilities
 uuid = { version = "1", features = ["v4", "serde"] }

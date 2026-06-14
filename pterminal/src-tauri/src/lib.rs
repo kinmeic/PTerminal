@@ -68,6 +68,7 @@ pub fn run() {
             commands::ai::ai_config,
             commands::ai::ai_messages,
             commands::ai::ai_test,
+            commands::ai::ai_cancel,
             commands::settings::settings_get,
             commands::settings::settings_set,
         ])

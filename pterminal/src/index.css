@@ -469,6 +469,7 @@ body {
 
 .ai-chat-composer {
   flex-shrink: 0;
+  align-items: flex-start;
   display: flex;
   gap: 6px;
   padding: 8px 10px;
@@ -476,23 +477,32 @@ body {
   background-color: var(--color-bg-secondary);
 }
 
-.ai-chat-composer input {
+.ai-chat-composer textarea {
   flex: 1;
   min-width: 0;
+  /* Cap growth at ~6 lines; beyond that the field scrolls internally. */
+  max-height: 138px;
   padding: 7px 10px;
   border-radius: 6px;
   border: 1px solid var(--color-border);
   background-color: var(--color-bg-primary);
   color: var(--color-text-primary);
   font-size: 12px;
+  line-height: 1.5;
   outline: none;
+  resize: none;
+  overflow-y: auto;
+  /* Match the send button height on a single row so they align baseline. */
+  font-family: inherit;
 }
 
-.ai-chat-composer input:focus {
+.ai-chat-composer textarea:focus {
   border-color: var(--color-accent);
 }
 
 .ai-chat-send {
+  /* Top-align so it stays put when the textarea grows to multiple rows. */
+  align-self: flex-start;
   padding: 6px 10px;
   flex-shrink: 0;
 }

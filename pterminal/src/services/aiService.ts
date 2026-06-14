@@ -4,6 +4,8 @@ import type { AIConfig, AIMessage, AISettings } from '@/types';
 export interface AiChatInput {
   terminalId: string;
   message: string;
+  /** Client-generated id; a later `cancel(requestId)` aborts this stream. */
+  requestId: string;
   history?: { role: string; content: string }[];
   /** Snapshot of recent terminal output to include as context. */
   terminalContext?: string;
@@ -12,12 +14,16 @@ export interface AiChatInput {
 export interface AiSuggestInput {
   terminalId: string;
   prompt: string;
+  /** Client-generated id; a later `cancel(requestId)` aborts this stream. */
+  requestId: string;
 }
 
 export interface AiExplainInput {
   terminalId: string;
   output: string;
   diagnose?: boolean;
+  /** Client-generated id; a later `cancel(requestId)` aborts this stream. */
+  requestId: string;
 }
 
 /** Paginated AI messages: the loaded page plus the total matching count. */
@@ -45,6 +51,11 @@ export const aiService = {
   /** Explain output or diagnose an error (streamed). */
   explain(input: AiExplainInput): Promise<void> {
     return invoke<void>('ai_explain', { input });
+  },
+
+  /** Abort an in-flight stream by the id passed to chat/suggest/explain. */
+  cancel(requestId: string): Promise<void> {
+    return invoke<void>('ai_cancel', { requestId });
   },
 
   /** Persist AI provider settings. */

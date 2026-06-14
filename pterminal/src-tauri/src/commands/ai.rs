@@ -4,6 +4,7 @@ use crate::state::AppState;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
+use tokio_util::sync::CancellationToken;
 
 /// Shared payload for all AI streaming events. The frontend matches on
 /// `request_id` to route deltas to the right panel/turn.
@@ -23,6 +24,8 @@ pub struct AiStreamPayload {
 pub struct AiChatInput {
     pub terminal_id: String,
     pub message: String,
+    /// Client-generated id for this turn, used to match a later `ai_cancel`.
+    pub request_id: String,
     /// Optional recent conversation history (role + content).
     pub history: Option<Vec<ChatMessage>>,
     /// Optional snapshot of recent terminal output lines, included as context.
@@ -34,6 +37,8 @@ pub struct AiChatInput {
 pub struct AiSuggestInput {
     pub terminal_id: String,
     pub prompt: String,
+    /// Client-generated id for this turn, used to match a later `ai_cancel`.
+    pub request_id: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -42,6 +47,8 @@ pub struct AiExplainInput {
     pub terminal_id: String,
     pub output: String,
     pub diagnose: Option<bool>,
+    /// Client-generated id for this turn, used to match a later `ai_cancel`.
+    pub request_id: String,
 }
 
 /// Persist a user message and an (empty) assistant placeholder, returning
@@ -102,6 +109,10 @@ fn terminal_cwd(state: &AppState, terminal_id: &str) -> String {
 
 /// Run a streaming chat against the configured provider, emitting
 /// `ai-delta` / `ai-done` events. Persists both turns to `ai_messages`.
+///
+/// `request_id` is supplied by the frontend and registered in `state.cancels`
+/// so a later `ai_cancel` can abort the stream mid-flight. The token is
+/// removed when the stream completes (naturally, by error, or by cancel).
 async fn run_stream(
     app: AppHandle,
     state: AppState,
@@ -109,9 +120,25 @@ async fn run_stream(
     kind: String,
     messages: Vec<ChatMessage>,
     user_text: String,
+    request_id: String,
 ) -> Result<(), String> {
-    let request_id = uuid::Uuid::new_v4().to_string();
     let cfg = ai::load_config(&state.db);
+
+    // Register a cancellation token for this turn. If the id is already in use
+    // (frontend bug / reused id), cancel the old one and replace it.
+    let cancel = {
+        let mut map = state.cancels.lock().expect("cancels lock poisoned");
+        let token = CancellationToken::new();
+        let token_clone = token.clone();
+        map.insert(request_id.clone(), token);
+        token_clone
+    };
+
+    // Always remove the token on exit so the map doesn't leak finished streams.
+    let cleanup = |state: &AppState, id: &str| {
+        let mut map = state.cancels.lock().expect("cancels lock poisoned");
+        map.remove(id);
+    };
 
     // Persist the user turn + assistant placeholder.
     let (_user_id, assistant_id) =
@@ -119,6 +146,7 @@ async fn run_stream(
             Ok(ids) => ids,
             Err(e) => {
                 let _ = emit_error(&app, &request_id, &terminal_id, &kind, &e);
+                cleanup(&state, &request_id);
                 return Err(e);
             }
         };
@@ -133,48 +161,66 @@ async fn run_stream(
             let msg = format!("AI request failed: {e}");
             let _ = emit_error(&app, &request_id, &terminal_id, &kind, &msg);
             let _ = finalize_assistant(&state, &assistant_id, &msg);
+            cleanup(&state, &request_id);
             return Err(msg);
         }
     };
 
     use futures_util::StreamExt;
     let mut stream = stream;
-    while let Some(item) = stream.next().await {
-        match item {
-            Ok(ai::stream::StreamEvent::Delta(delta)) => {
-                full.push_str(&delta);
-                let _ = app.emit(
-                    "ai-delta",
-                    AiStreamPayload {
-                        request_id: request_id.clone(),
-                        terminal_id: terminal_id.clone(),
-                        kind: kind.clone(),
-                        delta: Some(delta),
-                        error: None,
-                        done: false,
-                    },
-                );
+    let mut cancelled = false;
+    loop {
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => {
+                cancelled = true;
+                break;
             }
-            Ok(ai::stream::StreamEvent::Done) => break,
-            Ok(ai::stream::StreamEvent::Error(e)) => {
-                let _ = emit_error(&app, &request_id, &terminal_id, &kind, &e);
-                let _ = finalize_assistant(&state, &assistant_id, &format!("{full}\n\n[error: {e}]"));
-                return Err(e);
-            }
-            Err(e) => {
-                let _ = emit_error(&app, &request_id, &terminal_id, &kind, &e.to_string());
-                let _ = finalize_assistant(&state, &assistant_id, &format!("{full}\n\n[error: {e}]"));
-                return Err(e.to_string());
+            item = stream.next() => {
+                match item {
+                    Some(Ok(ai::stream::StreamEvent::Delta(delta))) => {
+                        full.push_str(&delta);
+                        let _ = app.emit(
+                            "ai-delta",
+                            AiStreamPayload {
+                                request_id: request_id.clone(),
+                                terminal_id: terminal_id.clone(),
+                                kind: kind.clone(),
+                                delta: Some(delta),
+                                error: None,
+                                done: false,
+                            },
+                        );
+                    }
+                    Some(Ok(ai::stream::StreamEvent::Done)) => break,
+                    Some(Ok(ai::stream::StreamEvent::Error(e))) => {
+                        let _ = emit_error(&app, &request_id, &terminal_id, &kind, &e);
+                        let _ = finalize_assistant(&state, &assistant_id, &format!("{full}\n\n[error: {e}]"));
+                        cleanup(&state, &request_id);
+                        return Err(e);
+                    }
+                    Some(Err(e)) => {
+                        let _ = emit_error(&app, &request_id, &terminal_id, &kind, &e.to_string());
+                        let _ = finalize_assistant(&state, &assistant_id, &format!("{full}\n\n[error: {e}]"));
+                        cleanup(&state, &request_id);
+                        return Err(e.to_string());
+                    }
+                    None => break,
+                }
             }
         }
     }
 
-    // Finalize persisted assistant content + signal completion.
+    // Finalize persisted assistant content + signal completion. On cancel we
+    // keep whatever was streamed so far and tag it so the user sees it stopped.
+    if cancelled {
+        full.push_str("\n\n[已停止]");
+    }
     let _ = finalize_assistant(&state, &assistant_id, &full);
     let _ = app.emit(
         "ai-done",
         AiStreamPayload {
-            request_id,
+            request_id: request_id.clone(),
             terminal_id,
             kind,
             delta: None,
@@ -182,6 +228,7 @@ async fn run_stream(
             done: true,
         },
     );
+    cleanup(&state, &request_id);
     Ok(())
 }
 
@@ -221,7 +268,7 @@ pub async fn ai_chat(
         &cwd,
         input.terminal_context.as_deref(),
     );
-    run_stream(app, state.inner().clone(), input.terminal_id, "chat".to_string(), messages, input.message).await
+    run_stream(app, state.inner().clone(), input.terminal_id, "chat".to_string(), messages, input.message, input.request_id).await
 }
 
 /// Natural-language → shell command suggestion (streamed).
@@ -233,7 +280,7 @@ pub async fn ai_suggest(
 ) -> Result<(), String> {
     let cwd = terminal_cwd(&state, &input.terminal_id);
     let messages = prompt::suggest_messages(&input.prompt, &cwd);
-    run_stream(app, state.inner().clone(), input.terminal_id, "command_suggest".to_string(), messages, input.prompt).await
+    run_stream(app, state.inner().clone(), input.terminal_id, "command_suggest".to_string(), messages, input.prompt, input.request_id).await
 }
 
 /// Explain terminal output (or diagnose an error if `diagnose: true`).
@@ -254,7 +301,18 @@ pub async fn ai_explain(
     } else {
         prompt::explain_messages(&input.output, &cwd)
     };
-    run_stream(app, state.inner().clone(), input.terminal_id, kind.to_string(), messages, input.output).await
+    run_stream(app, state.inner().clone(), input.terminal_id, kind.to_string(), messages, input.output, input.request_id).await
+}
+
+/// Abort an in-flight AI stream by its request_id. No-op (Ok) if the id isn't
+/// registered — the frontend may issue a cancel after the stream already ended.
+#[tauri::command]
+pub fn ai_cancel(state: State<'_, AppState>, request_id: String) -> Result<(), String> {
+    let map = state.cancels.lock().expect("cancels lock poisoned");
+    if let Some(token) = map.get(&request_id) {
+        token.cancel();
+    }
+    Ok(())
 }
 
 /// Persist AI provider settings.
@@ -343,5 +401,5 @@ pub fn ai_messages(state: State<'_, AppState>, terminal_id: String) -> Result<cr
 #[tauri::command]
 pub async fn ai_test(state: State<'_, AppState>) -> Result<crate::ai::client::TestResult, String> {
     let cfg = ai::load_config(&state.db);
-    Ok(crate::ai::client::test_connection(&cfg).await)
+    Ok(crate::ai::client::test_connection(&state.http, &cfg).await)
 }

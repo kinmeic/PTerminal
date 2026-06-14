@@ -2,7 +2,9 @@ use crate::db::DbPool;
 use portable_pty::{Child, MasterPty, PtySize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, RwLock};
+use tokio_util::sync::CancellationToken;
 
 /// A live terminal session backed by a real PTY.
 #[allow(dead_code)]
@@ -17,6 +19,11 @@ pub struct TerminalSession {
     pub child: Box<dyn Child + Send + Sync>,
     pub cwd: PathBuf,
     pub size: PtySize,
+    /// Cancellation flag shared with the reader thread. Set by `terminal_kill`
+    /// / `terminal_delete` so a reader blocked in `poll()` returns within
+    /// `READ_POLL_TIMEOUT_MS` even if the child process hangs instead of
+    /// exiting (H6: prevents the reader thread from leaking forever).
+    pub reader_cancel: Arc<AtomicBool>,
 }
 
 impl TerminalSession {
@@ -50,6 +57,12 @@ pub struct AppState {
     /// (internal Arc) and reuses connection pools / TLS sessions, so we build
     /// one per app lifetime instead of per request.
     pub http: reqwest::Client,
+    /// Cancellation tokens for in-flight AI streams, keyed by request_id
+    /// (supplied by the frontend). The frontend calls `ai_cancel(requestId)`
+    /// to abort a running stream; `run_stream` inserts on start and removes on
+    /// completion. Standard Mutex (not RwLock): insert/remove/cancel are all
+    /// short write ops, and a stream never reads another stream's token.
+    pub cancels: Arc<Mutex<HashMap<String, CancellationToken>>>,
 }
 
 impl AppState {
@@ -58,6 +71,7 @@ impl AppState {
             db,
             sessions: Arc::new(RwLock::new(HashMap::new())),
             http: crate::ai::client::build_client(),
+            cancels: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 

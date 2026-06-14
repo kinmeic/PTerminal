@@ -1,5 +1,10 @@
 use crate::ai::AiConfig;
 use reqwest::Client;
+use std::time::Duration;
+
+/// Per-request timeout for connection tests. Shorter than the streaming client's
+/// 120s default since a connectivity probe should fail fast.
+const TEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Build a shared HTTP client for LLM requests with a generous timeout.
 pub fn build_client() -> Client {
@@ -32,12 +37,11 @@ pub struct TestResult {
 /// Send a minimal non-streaming request to verify the provider is reachable
 /// and the API key (if required) is accepted. Used by the settings "测试连接"
 /// button — does NOT persist anything or stream.
-pub async fn test_connection(cfg: &AiConfig) -> TestResult {
-    let client = Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .unwrap_or_else(|_| Client::new());
-
+///
+/// Uses the shared app-wide `client` (connection pool / TLS reuse, same as
+/// `run_stream`) with a per-request timeout that overrides the client's
+/// default 120s so a dead endpoint fails fast.
+pub async fn test_connection(client: &Client, cfg: &AiConfig) -> TestResult {
     match cfg.provider {
         crate::ai::Provider::OpenAI => {
             let url = join_api_url(&cfg.base_url, "/v1/chat/completions");
@@ -47,7 +51,7 @@ pub async fn test_connection(cfg: &AiConfig) -> TestResult {
                 "max_tokens": 1,
                 "stream": false,
             });
-            let mut req = client.post(&url).json(&body);
+            let mut req = client.post(&url).json(&body).timeout(TEST_TIMEOUT);
             if let Some(key) = &cfg.api_key {
                 req = req.bearer_auth(key);
             }
@@ -77,6 +81,7 @@ pub async fn test_connection(cfg: &AiConfig) -> TestResult {
             let url = join_api_url(&cfg.base_url, "/v1/messages");
             let mut req = client
                 .post(&url)
+                .timeout(TEST_TIMEOUT)
                 .header("anthropic-version", "2023-06-01")
                 .header("content-type", "application/json")
                 .json(&serde_json::json!({

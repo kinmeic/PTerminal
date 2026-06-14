@@ -7,11 +7,18 @@ use crate::state::{AppState, TerminalSession};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use rusqlite::params;
 use std::io::Read;
+use std::os::unix::io::RawFd;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 
 const DEFAULT_COLS: u16 = 80;
 const DEFAULT_ROWS: u16 = 24;
 const READ_BUF_SIZE: usize = 8 * 1024;
+/// How long `poll()` blocks waiting for PTY output before the reader thread
+/// wakes up to re-check the cancellation flag (H6). 2s keeps the thread
+/// responsive to `terminal_kill` without busy-spinning.
+const READ_POLL_TIMEOUT_MS: libc::c_int = 2000;
 
 /// Spawn a new PTY-backed shell and persist its configuration to the database.
 #[tauri::command]
@@ -107,6 +114,17 @@ pub fn terminal_spawn(
         .try_clone_reader()
         .map_err(|e| format!("clone reader failed: {e}"))?;
 
+    // Independent fd used only to `poll()` for readability inside the reader
+    // thread (H6). It's a dup of the master fd, so POLLIN on it mirrors data
+    // available to `reader.read()`, but it lives only for the lifetime of the
+    // reader thread — closing it when the thread exits never affects the
+    // session's master fd. This decouples poll-waiting from master ownership.
+    let poll_fd: RawFd = pair
+        .master
+        .as_raw_fd()
+        .ok_or_else(|| "pty master has no raw fd".to_string())?;
+    let reader_cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
     let session = TerminalSession {
         id: id.clone(),
         master: pair.master,
@@ -114,6 +132,7 @@ pub fn terminal_spawn(
         child,
         cwd: std::path::PathBuf::from(&cwd),
         size,
+        reader_cancel: reader_cancel.clone(),
     };
     state.insert_session(session);
 
@@ -127,7 +146,40 @@ pub fn terminal_spawn(
         // boundaries. Without this, a multi-byte char (CJK, emoji) split
         // across two reads would be corrupted into replacement characters.
         let mut leftover: Vec<u8> = Vec::new();
+        // dup the poll fd into the thread's ownership so closing it on exit
+        // never touches the session's master fd.
+        let owned_poll_fd = unsafe { libc::dup(poll_fd) };
+        let poll_fd_valid = owned_poll_fd >= 0;
+        let mut pollfds = [libc::pollfd {
+            fd: if poll_fd_valid { owned_poll_fd } else { -1 },
+            events: libc::POLLIN,
+            revents: 0,
+        }];
         loop {
+            // Check cancellation first — a kill sets this flag and we want to
+            // exit within one poll cycle even if the child is hung.
+            if reader_cancel.load(Ordering::Acquire) {
+                break;
+            }
+            // Wait up to READ_POLL_TIMEOUT_MS for output, then loop back so the
+            // cancel check runs periodically. This replaces the old indefinite
+            // `reader.read()` block that could wedge the thread forever when a
+            // child process hung without exiting.
+            let nready = unsafe { libc::poll(pollfds.as_mut_ptr(), 1, READ_POLL_TIMEOUT_MS) };
+            if nready < 0 {
+                let e = std::io::Error::last_os_error();
+                // EINTR just means a signal interrupted poll — retry the loop.
+                if e.kind() == std::io::ErrorKind::Interrupted {
+                    continue;
+                }
+                break;
+            }
+            if nready == 0 {
+                // Timed out with no data; loop back to re-check cancellation.
+                continue;
+            }
+            // poll reported readable (POLLIN) or hangup (POLLHUP). On POLLHUP
+            // the child has exited — read will return Ok(0) / EOF shortly.
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
@@ -150,6 +202,10 @@ pub fn terminal_spawn(
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(_) => break,
             }
+        }
+        // Close the dup'd poll fd owned by this thread.
+        if poll_fd_valid {
+            unsafe { libc::close(owned_poll_fd) };
         }
         // Flush any remaining bytes at EOF.
         if !leftover.is_empty() {
@@ -259,6 +315,10 @@ pub fn terminal_kill(state: State<'_, AppState>, id: String) -> Result<(), Strin
             log::error!("terminal session mutex poisoned, recovering");
             poisoned.into_inner()
         });
+        // Signal the reader thread to exit its poll loop, then kill the child.
+        // Order matters: set the flag first so a hung child (kill fails or it's
+        // in D state) still lets the reader unblock within one poll cycle (H6).
+        session.reader_cancel.store(true, Ordering::Release);
         let _ = session.child.kill();
     }
     Ok(())
@@ -350,6 +410,10 @@ pub fn terminal_delete(state: State<'_, AppState>, id: String) -> Result<(), Str
             log::error!("terminal session mutex poisoned, recovering");
             poisoned.into_inner()
         });
+        // Signal the reader thread to exit its poll loop, then kill the child.
+        // Order matters: set the flag first so a hung child (kill fails or it's
+        // in D state) still lets the reader unblock within one poll cycle (H6).
+        session.reader_cancel.store(true, Ordering::Release);
         let _ = session.child.kill();
     }
     let conn: DbConn = state.db.get().map_err(|e| e.to_string())?;

@@ -94,6 +94,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "futures-util",
+ "libc",
  "log",
  "portable-pty",
  "r2d2",
@@ -107,6 +108,7 @@ dependencies = [
  "tauri-plugin-log",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-util",
  "uuid",
 ]
 
@@ -4278,6 +4280,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]

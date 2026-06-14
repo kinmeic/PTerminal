@@ -34,6 +34,9 @@ interface AppState {
   // AI state
   aiConfig: AIConfig | null;
   isAiStreaming: boolean;
+  /** Request id of the in-flight AI stream, if any. Used to call `ai_cancel`.
+   * Set by `startAiTurn`, cleared by `finishAiTurn`. */
+  activeAiRequestId: string | null;
 
   // UI state
   leftWidth: number;
@@ -81,7 +84,7 @@ interface AppState {
   saveAiConfig: (settings: Partial<AIConfig> & { apiKey?: string }) => Promise<void>;
   loadAiMessages: (terminalId: string) => Promise<void>;
   /** Start a new assistant turn as an empty streaming placeholder. */
-  startAiTurn: (terminalId: string, userText: string, kind: string) => void;
+  startAiTurn: (terminalId: string, userText: string, kind: string, requestId: string) => void;
   /** Append a streamed delta to the latest assistant message. */
   appendAiDelta: (delta: string) => void;
   /** Mark the current stream finished (optionally with an error). */
@@ -126,6 +129,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   sshShortcuts: [],
   aiConfig: null,
   isAiStreaming: false,
+  activeAiRequestId: null,
   leftWidth: DEFAULT_LEFT_WIDTH,
   rightWidth: DEFAULT_RIGHT_WIDTH,
   isDarkMode: true,
@@ -414,7 +418,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  startAiTurn: (terminalId, userText, kind) => {
+  startAiTurn: (terminalId, userText, kind, requestId) => {
     const now = Date.now();
     const userMsg: AIMessage = {
       id: `tmp-u-${now}`,
@@ -435,6 +439,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       aiMessages: [...state.aiMessages, userMsg, assistantMsg],
       isAiStreaming: true,
+      activeAiRequestId: requestId,
     }));
   },
 
@@ -458,7 +463,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           content: last.content || `⚠ ${error}`,
         };
       }
-      return { aiMessages: msgs, isAiStreaming: false };
+      return { aiMessages: msgs, isAiStreaming: false, activeAiRequestId: null };
     }),
 
   runSuggestedCommand: async (terminalId, command) => {
