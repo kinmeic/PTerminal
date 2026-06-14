@@ -1,6 +1,6 @@
 {
   "name": "pterminal",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "macOS native AI terminal powered by Tauri",
   "type": "module",
   "scripts": {
