@@ -252,6 +252,28 @@ body {
   border-left: 1px solid var(--color-border);
 }
 
+/* Left panel overlay — floats over content when collapsed and hovering */
+.panel-sidebar-overlay {
+  position: absolute;
+  top: 36px; /* below the topbar */
+  left: 0;
+  height: calc(100% - 36px);
+  z-index: 100;
+  box-shadow: 4px 0 12px rgba(0, 0, 0, 0.3);
+  animation: slideInLeft 0.15s ease-out;
+}
+
+@keyframes slideInLeft {
+  from {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
 /* Unified header bar: fixed height, flex centering, consistent across all
    three columns so the tops align perfectly. */
 .panel-header {
@@ -469,8 +491,8 @@ body {
 
 .ai-chat-composer {
   flex-shrink: 0;
-  align-items: flex-start;
   display: flex;
+  flex-direction: column;
   gap: 6px;
   padding: 8px 10px;
   border-top: 1px solid var(--color-border);
@@ -478,7 +500,7 @@ body {
 }
 
 .ai-chat-composer textarea {
-  flex: 1;
+  width: 100%;
   min-width: 0;
   /* Cap growth at ~6 lines; beyond that the field scrolls internally. */
   max-height: 138px;
@@ -492,7 +514,6 @@ body {
   outline: none;
   resize: none;
   overflow-y: auto;
-  /* Match the send button height on a single row so they align baseline. */
   font-family: inherit;
 }
 
@@ -500,11 +521,20 @@ body {
   border-color: var(--color-accent);
 }
 
+.ai-chat-buttons {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+
+.ai-chat-clear {
+  padding: 5px 8px;
+}
+
 .ai-chat-send {
-  /* Top-align so it stays put when the textarea grows to multiple rows. */
-  align-self: flex-start;
-  padding: 6px 10px;
-  flex-shrink: 0;
+  padding: 5px 10px;
+  margin-left: auto;
 }
 
 .ai-empty {

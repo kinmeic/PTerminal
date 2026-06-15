@@ -77,4 +77,9 @@ export const aiService = {
   test(): Promise<AiTestResult> {
     return invoke<AiTestResult>('ai_test');
   },
+
+  /** Clear all AI messages for a terminal (reset conversation). */
+  clearMessages(terminalId: string): Promise<void> {
+    return invoke<void>('ai_clear_messages', { terminalId });
+  },
 };

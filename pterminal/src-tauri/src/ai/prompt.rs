@@ -1,4 +1,95 @@
-use crate::ai::ChatMessage;
+use crate::ai::{AiConfig, ChatMessage};
+
+/// Rough token estimation: ~4 chars/token for English, ~2 for CJK.
+/// This is a fast heuristic; actual tokenization varies by model.
+fn estimate_tokens(text: &str) -> usize {
+    let mut count = 0;
+    for ch in text.chars() {
+        if ch.is_ascii() {
+            count += 1;
+        } else {
+            // CJK and other multi-byte chars count as ~2 tokens each
+            count += 2;
+        }
+    }
+    count / 4
+}
+
+/// Estimate total tokens across all messages.
+fn estimate_messages_tokens(messages: &[ChatMessage]) -> usize {
+    messages.iter().map(|m| estimate_tokens(&m.content) + 4).sum() // +4 for role/formatting
+}
+
+/// Compress conversation history when it exceeds the context budget.
+/// Strategy: keep system message + most recent messages that fit within budget.
+fn compress_history(messages: Vec<ChatMessage>, budget: usize) -> Vec<ChatMessage> {
+    if messages.is_empty() {
+        return messages;
+    }
+
+    let total = estimate_messages_tokens(&messages);
+    if total <= budget {
+        return messages;
+    }
+
+    // Always keep the system message (first) and current user message (last).
+    // Trim from the middle (older conversation turns).
+    let mut result = Vec::new();
+
+    // Keep system message if present
+    let start_idx = if messages.first().map(|m| m.role.as_str()) == Some("system") {
+        result.push(messages[0].clone());
+        1
+    } else {
+        0
+    };
+
+    // Keep the last user message
+    let end_idx = messages.len();
+    let last_user_idx = messages.iter().rposition(|m| m.role == "user");
+
+    // Calculate remaining budget after system + last user message
+    let system_tokens = result.iter().map(|m| estimate_tokens(&m.content) + 4).sum::<usize>();
+    let last_user_tokens = last_user_idx.map(|i| estimate_tokens(&messages[i].content) + 4).unwrap_or(0);
+    let remaining_budget = budget.saturating_sub(system_tokens + last_user_tokens);
+
+    // Add messages from the end (most recent) until budget is exhausted
+    let mut middle_messages: Vec<&ChatMessage> = messages[start_idx..end_idx]
+        .iter()
+        .enumerate()
+        .filter(|(idx, _)| last_user_idx.map(|i| start_idx + idx != i).unwrap_or(true))
+        .map(|(_, m)| m)
+        .collect();
+    middle_messages.reverse(); // Process from most recent
+
+    let mut added: Vec<ChatMessage> = Vec::new();
+    let mut used = 0;
+    for msg in middle_messages {
+        let tokens = estimate_tokens(&msg.content) + 4;
+        if used + tokens > remaining_budget {
+            break;
+        }
+        used += tokens;
+        added.push(msg.clone());
+    }
+    added.reverse(); // Restore chronological order
+    result.extend(added);
+
+    // Add last user message
+    if let Some(idx) = last_user_idx {
+        result.push(messages[idx].clone());
+    }
+
+    log::info!(
+        "Context compressed: {} messages ({} tokens) -> {} messages (~{} tokens)",
+        messages.len(),
+        total,
+        result.len(),
+        estimate_messages_tokens(&result)
+    );
+
+    result
+}
 
 /// Build the system + user message pair for a general assistant chat turn.
 /// `terminal_context` is an optional snapshot of recent terminal output that
@@ -8,6 +99,7 @@ pub fn chat_messages(
     user_text: &str,
     cwd: &str,
     terminal_context: Option<&str>,
+    config: &AiConfig,
 ) -> Vec<ChatMessage> {
     let context_block = match terminal_context {
         Some(c) if !c.trim().is_empty() => format!(
@@ -32,7 +124,10 @@ pub fn chat_messages(
         role: "user".to_string(),
         content: user_text.to_string(),
     });
-    msgs
+
+    // Apply compression if needed
+    let budget = (config.context_window as f32 * config.compression_threshold) as usize;
+    compress_history(msgs, budget)
 }
 
 /// Natural-language → shell command. Output must be a raw command (no prose).

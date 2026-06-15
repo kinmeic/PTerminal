@@ -15,6 +15,7 @@ import { toast } from '@/stores/toastStore';
 /** Terminal font defaults (used when no saved preference exists). */
 export const DEFAULT_FONT_FAMILY = "'SF Mono', 'Monaco', 'Consolas', monospace";
 export const DEFAULT_FONT_SIZE = 13;
+export const DEFAULT_LINE_HEIGHT = 1;
 const MIN_FONT_SIZE = 8;
 const MAX_FONT_SIZE = 32;
 
@@ -48,6 +49,8 @@ interface AppState {
   isDarkMode: boolean;
   isRightPanelVisible: boolean;
   isLeftPanelVisible: boolean;
+  /** Whether the left panel overlay is showing (hover preview when collapsed). */
+  isLeftPanelHovering: boolean;
 
   // Top-level view switch
   activeView: 'terminal' | 'settings';
@@ -91,6 +94,8 @@ interface AppState {
   loadAiConfig: () => Promise<void>;
   saveAiConfig: (settings: Partial<AIConfig> & { apiKey?: string }) => Promise<void>;
   loadAiMessages: (terminalId: string) => Promise<void>;
+  /** Clear all AI messages for a terminal (reset conversation). */
+  clearAiMessages: (terminalId: string) => Promise<void>;
   /** Start a new assistant turn as an empty streaming placeholder. */
   startAiTurn: (terminalId: string, userText: string, kind: string, requestId: string) => void;
   /** Append a streamed delta to the latest assistant message. */
@@ -110,6 +115,8 @@ interface AppState {
   toggleDarkMode: () => void;
   toggleRightPanel: () => void;
   toggleLeftPanel: () => void;
+  /** Show/hide the left panel overlay (hover preview). */
+  setLeftPanelHovering: (hovering: boolean) => void;
   setAiMessages: (messages: AIMessage[]) => void;
   /** Restore saved UI state (panel visibility, theme, widths) on startup. */
   loadUiState: () => Promise<void>;
@@ -117,6 +124,7 @@ interface AppState {
   // --- Terminal appearance ---
   fontFamily: string;
   fontSize: number;
+  lineHeight: number;
   /** Load saved font family/size from the settings table. */
   loadAppearance: () => Promise<void>;
   /** Persist and apply a new font family to all live terminals. */
@@ -125,6 +133,8 @@ interface AppState {
   adjustTerminalFontSize: (delta: number) => Promise<void>;
   /** Set the global default font size (used by new terminals and those without an override). */
   setDefaultFontSize: (size: number) => Promise<void>;
+  /** Set the line height multiplier (applied globally). */
+  setLineHeight: (lineHeight: number) => Promise<void>;
 }
 
 const MIN_PANEL_WIDTH = 240;
@@ -161,9 +171,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   isDarkMode: true,
   isRightPanelVisible: false,
   isLeftPanelVisible: true,
+  isLeftPanelHovering: false,
   activeView: 'terminal',
   fontFamily: DEFAULT_FONT_FAMILY,
   fontSize: DEFAULT_FONT_SIZE,
+  lineHeight: DEFAULT_LINE_HEIGHT,
 
   setActiveTerminal: (id) => {
     const requestId = id ? get().aiStreams[id] ?? null : null;
@@ -466,6 +478,15 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  clearAiMessages: async (terminalId) => {
+    try {
+      await aiService.clearMessages(terminalId);
+      set({ aiMessages: [], aiMessagesTotal: 0 });
+    } catch (err) {
+      toast.error('Failed to clear AI messages'); console.error(err);
+    }
+  },
+
   startAiTurn: (terminalId, userText, kind, requestId) => {
     const now = Date.now();
     const userMsg: AIMessage = {
@@ -582,8 +603,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => {
       const next = !state.isLeftPanelVisible;
       void settingsService.set(SETTING_KEYS.leftPanelVisible, next ? '1' : '0').catch(() => {});
-      return { isLeftPanelVisible: next };
+      return { isLeftPanelVisible: next, isLeftPanelHovering: false };
     }),
+
+  setLeftPanelHovering: (hovering) => set({ isLeftPanelHovering: hovering }),
 
   // Persist the current panel widths. Called on drag end (mouseup) rather than
   // every mousemove to avoid hammering SQLite during a resize (需求 2).
@@ -623,20 +646,22 @@ export const useAppStore = create<AppState>((set, get) => ({
   // --- Terminal appearance ---
   loadAppearance: async () => {
     try {
-      const [family, size] = await Promise.all([
+      const [family, size, lineHeight] = await Promise.all([
         settingsService.get(SETTING_KEYS.fontFamily),
         settingsService.get(SETTING_KEYS.fontSize),
+        settingsService.get(SETTING_KEYS.lineHeight),
       ]);
       const next = {
         fontFamily: family || DEFAULT_FONT_FAMILY,
         fontSize: size ? Number(size) || DEFAULT_FONT_SIZE : DEFAULT_FONT_SIZE,
+        lineHeight: lineHeight ? Number(lineHeight) || DEFAULT_LINE_HEIGHT : DEFAULT_LINE_HEIGHT,
       };
       set(next);
       // Font family is global; font size is per-terminal. Apply the family to
       // every terminal, preserving each terminal's own size override.
       const { terminals } = get();
       for (const t of terminals) {
-        terminalRegistry.applyFont(t.id, next.fontFamily, t.fontSize ?? next.fontSize);
+        terminalRegistry.applyFont(t.id, next.fontFamily, t.fontSize ?? next.fontSize, next.lineHeight);
       }
     } catch (err) {
       console.error('Failed to load appearance:', err);
@@ -695,6 +720,21 @@ export const useAppStore = create<AppState>((set, get) => ({
       await settingsService.set(SETTING_KEYS.fontSize, String(clamped));
     } catch (err) {
       console.error('Failed to save default font size:', err);
+    }
+  },
+
+  setLineHeight: async (lineHeight) => {
+    const clamped = Math.max(0.8, Math.min(2.0, lineHeight));
+    set({ lineHeight: clamped });
+    // Apply to all terminals
+    const { terminals, fontFamily, fontSize } = get();
+    for (const t of terminals) {
+      terminalRegistry.applyFont(t.id, fontFamily, t.fontSize ?? fontSize, clamped);
+    }
+    try {
+      await settingsService.set(SETTING_KEYS.lineHeight, String(clamped));
+    } catch (err) {
+      console.error('Failed to save line height:', err);
     }
   },
 

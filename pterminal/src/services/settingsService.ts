@@ -18,6 +18,7 @@ export const settingsService = {
 export const SETTING_KEYS = {
   fontFamily: 'terminal_font_family',
   fontSize: 'terminal_font_size',
+  lineHeight: 'terminal_line_height',
   // UI state persistence (需求 2)
   leftPanelVisible: 'ui_left_panel_visible',
   rightPanelVisible: 'ui_right_panel_visible',

@@ -46,6 +46,11 @@ pub struct AiConfig {
     /// How many lines of terminal output to include as context when the user
     /// sends an AI chat message. 0 disables context inclusion.
     pub terminal_context_lines: u32,
+    /// Maximum context window size in tokens (for compression decisions).
+    pub context_window: u32,
+    /// Threshold (0.0–1.0) at which to trigger compression. When estimated
+    /// tokens exceed context_window * threshold, history is compressed.
+    pub compression_threshold: f32,
 }
 
 /// Load AI settings from the `settings` table, falling back to Ollama defaults.
@@ -77,6 +82,12 @@ pub fn load_config(db: &DbPool) -> AiConfig {
     let terminal_context_lines = get("ai_terminal_context_lines")
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or(50);
+    let context_window = get("ai_context_window")
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(200000);
+    let compression_threshold = get("ai_compression_threshold")
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(0.75);
 
     AiConfig {
         provider_id: provider_str,
@@ -85,6 +96,8 @@ pub fn load_config(db: &DbPool) -> AiConfig {
         model,
         base_url,
         terminal_context_lines,
+        context_window,
+        compression_threshold,
     }
 }
 
@@ -114,6 +127,12 @@ pub fn save_config(db: &DbPool, cfg: &AiConfigSettings) -> anyhow::Result<()> {
     if let Some(n) = cfg.terminal_context_lines {
         upsert("ai_terminal_context_lines", &n.to_string())?;
     }
+    if let Some(n) = cfg.context_window {
+        upsert("ai_context_window", &n.to_string())?;
+    }
+    if let Some(n) = cfg.compression_threshold {
+        upsert("ai_compression_threshold", &n.to_string())?;
+    }
     Ok(())
 }
 
@@ -126,6 +145,8 @@ pub struct AiConfigSettings {
     pub model: Option<String>,
     pub base_url: Option<String>,
     pub terminal_context_lines: Option<u32>,
+    pub context_window: Option<u32>,
+    pub compression_threshold: Option<f32>,
 }
 
 fn default_model(provider: &str, protocol: Provider) -> String {

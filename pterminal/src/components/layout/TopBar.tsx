@@ -76,6 +76,7 @@ export function TerminalTopBar() {
   const isRightPanelVisible = useAppStore((s) => s.isRightPanelVisible);
   const toggleLeftPanel = useAppStore((s) => s.toggleLeftPanel);
   const toggleRightPanel = useAppStore((s) => s.toggleRightPanel);
+  const setLeftPanelHovering = useAppStore((s) => s.setLeftPanelHovering);
   const isDarkMode = useAppStore((s) => s.isDarkMode);
   const toggleDarkMode = useAppStore((s) => s.toggleDarkMode);
 
@@ -96,6 +97,10 @@ export function TerminalTopBar() {
           className={`topbar-btn ${isLeftPanelVisible ? 'active' : ''}`}
           title={isLeftPanelVisible ? '隐藏侧边栏' : '显示侧边栏'}
           onClick={toggleLeftPanel}
+          onMouseEnter={() => {
+            if (!isLeftPanelVisible) setLeftPanelHovering(true);
+          }}
+          onMouseLeave={() => setLeftPanelHovering(false)}
         >
           <PanelLeft size={16} strokeWidth={1.75} />
         </button>

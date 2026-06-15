@@ -26,7 +26,7 @@ class TerminalRegistry {
   /** Create (or reuse) an xterm instance for the given id. */
   ensure(
     id: string,
-    opts?: { fontFamily?: string; fontSize?: number }
+    opts?: { fontFamily?: string; fontSize?: number; lineHeight?: number }
   ): Terminal {
     let entry = this.entries.get(id);
     if (entry) return entry.term;
@@ -40,7 +40,7 @@ class TerminalRegistry {
       convertEol: false,
       fontFamily: opts?.fontFamily ?? "'SF Mono', 'Monaco', 'Consolas', monospace",
       fontSize: opts?.fontSize ?? 13,
-      lineHeight: 1.25,
+      lineHeight: opts?.lineHeight ?? 1,
       scrollback: 10000,
       allowProposedApi: true,
       theme: readThemeFromCss(),
@@ -217,10 +217,11 @@ class TerminalRegistry {
 
   /** Apply a font family/size to all live terminals, then refit. Used by the
    *  appearance settings and the top-bar zoom controls. */
-  applyFontAll(fontFamily: string, fontSize: number): void {
+  applyFontAll(fontFamily: string, fontSize: number, lineHeight?: number): void {
     for (const entry of this.entries.values()) {
       entry.term.options.fontFamily = fontFamily;
       entry.term.options.fontSize = fontSize;
+      if (lineHeight !== undefined) entry.term.options.lineHeight = lineHeight;
     }
     // Refit each visible terminal so rows/cols match the new glyph metrics.
     for (const id of this.entries.keys()) {
@@ -230,11 +231,12 @@ class TerminalRegistry {
 
   /** Apply font family/size to a single terminal, then refit it. Used when
    *  font size is per-terminal (zoom affects only the active terminal). */
-  applyFont(id: string, fontFamily: string, fontSize: number): void {
+  applyFont(id: string, fontFamily: string, fontSize: number, lineHeight?: number): void {
     const entry = this.entries.get(id);
     if (!entry) return;
     entry.term.options.fontFamily = fontFamily;
     entry.term.options.fontSize = fontSize;
+    if (lineHeight !== undefined) entry.term.options.lineHeight = lineHeight;
     this.fit(id);
   }
 

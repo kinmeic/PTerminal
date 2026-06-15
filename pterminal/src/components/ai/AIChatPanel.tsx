@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { Send, Square } from 'lucide-react';
+import { Send, Square, Trash2 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { aiService } from '@/services/aiService';
 import { terminalRegistry } from '@/services/terminalRegistry';
@@ -16,6 +16,7 @@ export function AIChatPanel() {
   const isAiStreaming = useAppStore((s) => s.isAiStreaming);
   const aiMessagesTotal = useAppStore((s) => s.aiMessagesTotal);
   const loadAiMessages = useAppStore((s) => s.loadAiMessages);
+  const clearAiMessages = useAppStore((s) => s.clearAiMessages);
   const aiConfig = useAppStore((s) => s.aiConfig);
   const runSuggestedCommand = useAppStore((s) => s.runSuggestedCommand);
   const [input, setInput] = useState('');
@@ -96,6 +97,12 @@ export function AIChatPanel() {
     if (requestId) void aiService.cancel(requestId);
   };
 
+  const handleClear = () => {
+    if (activeTerminalId && aiMessages.length > 0) {
+      void clearAiMessages(activeTerminalId);
+    }
+  };
+
   return (
     <div className="ai-chat">
       {/* Message list — fills remaining height, scrolls independently. */}
@@ -124,7 +131,7 @@ export function AIChatPanel() {
         )}
       </div>
 
-      {/* Composer — pinned to the bottom, full width. */}
+      {/* Composer — pinned to the bottom, textarea on top row, buttons below. */}
       <form className="ai-chat-composer" onSubmit={handleSend}>
         <textarea
           ref={textareaRef}
@@ -143,25 +150,36 @@ export function AIChatPanel() {
           rows={1}
           disabled={isAiStreaming}
         />
-        {isAiStreaming ? (
+        <div className="ai-chat-buttons">
           <button
             type="button"
-            className="btn btn-primary ai-chat-send"
-            onClick={handleStop}
-            title="Stop generating"
+            className="btn btn-secondary ai-chat-clear"
+            onClick={handleClear}
+            disabled={isAiStreaming || aiMessages.length === 0}
+            title="Clear conversation"
           >
-            <Square size={13} fill="currentColor" strokeWidth={1.75} />
+            <Trash2 size={13} strokeWidth={1.75} />
           </button>
-        ) : (
-          <button
-            type="submit"
-            className="btn btn-primary ai-chat-send"
-            disabled={!input.trim()}
-            title="Send"
-          >
-            <Send size={14} strokeWidth={1.75} />
-          </button>
-        )}
+          {isAiStreaming ? (
+            <button
+              type="button"
+              className="btn btn-primary ai-chat-send"
+              onClick={handleStop}
+              title="Stop generating"
+            >
+              <Square size={13} fill="currentColor" strokeWidth={1.75} />
+            </button>
+          ) : (
+            <button
+              type="submit"
+              className="btn btn-primary ai-chat-send"
+              disabled={!input.trim()}
+              title="Send"
+            >
+              <Send size={14} strokeWidth={1.75} />
+            </button>
+          )}
+        </div>
       </form>
     </div>
   );

@@ -57,6 +57,8 @@ export interface AISettings {
   model?: string;
   baseUrl?: string;
   terminalContextLines?: number;
+  contextWindow?: number;
+  compressionThreshold?: number;
 }
 
 /** AI configuration as returned by the `ai_config` command. */
@@ -66,6 +68,8 @@ export interface AIConfig {
   baseUrl: string;
   hasApiKey: boolean;
   terminalContextLines: number;
+  contextWindow: number;
+  compressionThreshold: number;
 }
 
 export interface SpawnTerminalInput {

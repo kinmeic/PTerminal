@@ -69,6 +69,7 @@ pub fn run() {
             commands::ai::ai_messages,
             commands::ai::ai_test,
             commands::ai::ai_cancel,
+            commands::ai::ai_clear_messages,
             commands::settings::settings_get,
             commands::settings::settings_set,
             commands::settings::proxy_reload,

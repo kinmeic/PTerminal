@@ -11,10 +11,12 @@ export function AppLayout() {
   const rightWidth = useAppStore((s) => s.rightWidth);
   const isLeftPanelVisible = useAppStore((s) => s.isLeftPanelVisible);
   const isRightPanelVisible = useAppStore((s) => s.isRightPanelVisible);
+  const isLeftPanelHovering = useAppStore((s) => s.isLeftPanelHovering);
   const isDarkMode = useAppStore((s) => s.isDarkMode);
   const setLeftWidth = useAppStore((s) => s.setLeftWidth);
   const setRightWidth = useAppStore((s) => s.setRightWidth);
   const persistPanelWidths = useAppStore((s) => s.persistPanelWidths);
+  const setLeftPanelHovering = useAppStore((s) => s.setLeftPanelHovering);
 
   useEffect(() => {
     document.documentElement.setAttribute(
@@ -39,6 +41,18 @@ export function AppLayout() {
             <Resizer onResize={(delta) => setLeftWidth(delta)} onResizeEnd={persistPanelWidths} />
           </>
         ) : null}
+
+        {/* Left panel hover overlay — shows when collapsed and hovering */}
+        {!isLeftPanelVisible && isLeftPanelHovering && (
+          <div
+            className="panel-sidebar panel-sidebar-overlay"
+            style={{ width: leftWidth }}
+            onMouseEnter={() => setLeftPanelHovering(true)}
+            onMouseLeave={() => setLeftPanelHovering(false)}
+          >
+            <LeftPanel />
+          </div>
+        )}
 
         {/* Center column — always visible */}
         <div

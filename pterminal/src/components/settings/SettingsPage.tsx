@@ -119,8 +119,10 @@ const FONT_SIZE_OPTIONS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 24, 28, 32]
 function GeneralSettings() {
   const fontFamily = useAppStore((s) => s.fontFamily);
   const fontSize = useAppStore((s) => s.fontSize);
+  const lineHeight = useAppStore((s) => s.lineHeight);
   const setTerminalFontFamily = useAppStore((s) => s.setTerminalFontFamily);
   const setDefaultFontSize = useAppStore((s) => s.setDefaultFontSize);
+  const setLineHeight = useAppStore((s) => s.setLineHeight);
 
   const labelStyle: React.CSSProperties = {
     fontSize: 12,
@@ -201,6 +203,31 @@ function GeneralSettings() {
           </div>
           <div style={hintStyle}>
             新建终端的初始字号（基准 13px = 100%）。已有终端可用顶部栏 +/− 单独缩放。
+          </div>
+        </div>
+
+        <div>
+          <label style={labelStyle}>行间距</label>
+          <div className="field-wrap">
+            <select
+              className="field-select"
+              value={String(lineHeight)}
+              onChange={(e) => void setLineHeight(Number(e.target.value))}
+            >
+              <option value="0.8">紧凑 (0.8)</option>
+              <option value="0.9">较紧 (0.9)</option>
+              <option value="1">标准 (1.0)</option>
+              <option value="1.1">稍松 (1.1)</option>
+              <option value="1.2">宽松 (1.2)</option>
+              <option value="1.3">很松 (1.3)</option>
+              <option value="1.5">超松 (1.5)</option>
+            </select>
+            <span className="field-chevron">
+              <ChevronDown size={16} strokeWidth={1.75} />
+            </span>
+          </div>
+          <div style={hintStyle}>
+            终端行与行之间的间距倍数，1.0 为紧凑无额外间距。
           </div>
         </div>
       </div>
@@ -374,6 +401,8 @@ function ModelSettings() {
   const [apiKey, setApiKey] = useState('');
   const [model, setModel] = useState('');
   const [contextLines, setContextLines] = useState(50);
+  const [contextWindow, setContextWindow] = useState(200000);
+  const [compressionThreshold, setCompressionThreshold] = useState(0.75);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -389,6 +418,8 @@ function ModelSettings() {
       setBaseUrl((aiConfig as AIConfig).baseUrl ?? '');
       setModel((aiConfig as AIConfig).model ?? '');
       setContextLines((aiConfig as AIConfig).terminalContextLines ?? 50);
+      setContextWindow((aiConfig as AIConfig).contextWindow ?? 200000);
+      setCompressionThreshold((aiConfig as AIConfig).compressionThreshold ?? 0.75);
       setApiKey('');
     }
   }, [aiConfig]);
@@ -401,6 +432,8 @@ function ModelSettings() {
     if (model.trim()) settings.model = model.trim();
     if (apiKey.trim()) settings.apiKey = apiKey.trim();
     settings.terminalContextLines = contextLines;
+    settings.contextWindow = contextWindow;
+    settings.compressionThreshold = compressionThreshold;
     await saveAiConfig(settings);
     setSaving(false);
     setSaved(true);
@@ -566,6 +599,38 @@ function ModelSettings() {
           </div>
           <div style={hintStyle}>
             发送 AI 消息时，自动将当前终端最近 N 行输出作为上下文一并发出。设为「不读取」可保护隐私或节省 token。
+          </div>
+        </div>
+
+        <div>
+          <label style={labelStyle}>上下文窗口长度（tokens）</label>
+          <input
+            type="number"
+            value={contextWindow}
+            onChange={(e) => setContextWindow(Number(e.target.value) || 200000)}
+            min={1000}
+            max={1000000}
+            step={1000}
+            style={fieldStyle}
+          />
+          <div style={hintStyle}>
+            大模型的上下文窗口大小（token 数）。用于判断何时需要压缩历史对话。默认 200000。
+          </div>
+        </div>
+
+        <div>
+          <label style={labelStyle}>上下文压缩阈值</label>
+          <input
+            type="number"
+            value={compressionThreshold}
+            onChange={(e) => setCompressionThreshold(Number(e.target.value) || 0.75)}
+            min={0.1}
+            max={1.0}
+            step={0.05}
+            style={fieldStyle}
+          />
+          <div style={hintStyle}>
+            当预估 token 数超过「窗口长度 × 阈值」时触发压缩。取值 0.1–1.0，默认 0.75。
           </div>
         </div>
 

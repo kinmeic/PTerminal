@@ -271,11 +271,13 @@ pub async fn ai_chat(
     input: AiChatInput,
 ) -> Result<(), String> {
     let cwd = terminal_cwd(&state, &input.terminal_id);
+    let config = ai::load_config(&state.db);
     let messages = prompt::chat_messages(
         &input.history.unwrap_or_default(),
         &input.message,
         &cwd,
         input.terminal_context.as_deref(),
+        &config,
     );
     run_stream(app, state.inner().clone(), input.terminal_id, "chat".to_string(), messages, input.message, input.request_id).await
 }
@@ -339,6 +341,8 @@ pub struct AiConfigDto {
     pub base_url: String,
     pub has_api_key: bool,
     pub terminal_context_lines: u32,
+    pub context_window: u32,
+    pub compression_threshold: f32,
 }
 
 #[tauri::command]
@@ -350,6 +354,8 @@ pub fn ai_config(state: State<'_, AppState>) -> Result<AiConfigDto, String> {
         base_url: cfg.base_url,
         has_api_key: cfg.api_key.is_some(),
         terminal_context_lines: cfg.terminal_context_lines,
+        context_window: cfg.context_window,
+        compression_threshold: cfg.compression_threshold,
     })
 }
 
@@ -418,4 +424,16 @@ pub async fn ai_test(state: State<'_, AppState>) -> Result<crate::ai::client::Te
         }
     };
     Ok(crate::ai::client::test_connection(&client, &cfg).await)
+}
+
+/// Clear all AI messages for a terminal (used by the "reset conversation" button).
+#[tauri::command]
+pub fn ai_clear_messages(state: State<'_, AppState>, terminal_id: String) -> Result<(), String> {
+    let conn: DbConn = state.db.get().map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM ai_messages WHERE terminal_id = ?1",
+        params![terminal_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
