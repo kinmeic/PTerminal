@@ -4,7 +4,7 @@ import { useAppStore } from '@/stores/appStore';
 import { aiService } from '@/services/aiService';
 import { SettingsTopBar } from '@/components/layout/TopBar';
 import { loadProxyConfig, saveProxyConfig, type ProxyConfig } from '@/services/proxyService';
-import type { AIConfig, SshShortcut } from '@/types';
+import type { AIConfig, AISettings, SshShortcut } from '@/types';
 
 type Section = 'general' | 'model' | 'ssh';
 
@@ -396,11 +396,11 @@ function ModelSettings() {
   const handleSave = async () => {
     setSaving(true);
     setSaved(false);
-    const settings: Record<string, string> = { provider };
+    const settings: AISettings = { provider };
     if (baseUrl.trim()) settings.baseUrl = baseUrl.trim();
     if (model.trim()) settings.model = model.trim();
     if (apiKey.trim()) settings.apiKey = apiKey.trim();
-    settings.terminalContextLines = String(contextLines);
+    settings.terminalContextLines = contextLines;
     await saveAiConfig(settings);
     setSaving(false);
     setSaved(true);
