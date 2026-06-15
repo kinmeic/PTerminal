@@ -92,6 +92,22 @@ pub fn terminal_spawn(
     if std::env::var("LC_CTYPE").is_err() {
         cmd.env("LC_CTYPE", "en_US.UTF-8");
     }
+
+    // Inject SOCKS proxy env vars so CLI tools (curl, wget, git, etc.) in the
+    // terminal also use the configured proxy. Only when apply_http is enabled.
+    let proxy_cfg = crate::ai::client::load_proxy_config(&state.db);
+    if let Some(ref socks_url) = proxy_cfg.socks_url {
+        if proxy_cfg.apply_http {
+            cmd.env("http_proxy", socks_url);
+            cmd.env("https_proxy", socks_url);
+            cmd.env("all_proxy", socks_url);
+            // Uppercase variants (some tools check these)
+            cmd.env("HTTP_PROXY", socks_url);
+            cmd.env("HTTPS_PROXY", socks_url);
+            cmd.env("ALL_PROXY", socks_url);
+        }
+    }
+
     if let Some(env_map) = &input.env {
         for (k, v) in env_map {
             cmd.env(k, v);

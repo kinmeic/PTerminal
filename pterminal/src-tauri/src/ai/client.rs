@@ -136,7 +136,13 @@ pub struct TestResult {
 pub async fn test_connection(client: &Client, cfg: &AiConfig) -> TestResult {
     match cfg.provider {
         crate::ai::Provider::OpenAI => {
-            let url = join_api_url(&cfg.base_url, "/v1/chat/completions");
+            // DeepSeek API doesn't use /v1 prefix
+            let path = if cfg.provider_id == "deepseek" {
+                "/chat/completions"
+            } else {
+                "/v1/chat/completions"
+            };
+            let url = join_api_url(&cfg.base_url, path);
             let body = serde_json::json!({
                 "model": cfg.model,
                 "messages": [{"role": "user", "content": "hi"}],

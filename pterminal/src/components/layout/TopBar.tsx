@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { useRef } from 'react';
 import { PanelLeft, PanelRight, Sun, Moon, ArrowLeft, ZoomIn, ZoomOut } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useAppStore } from '@/stores/appStore';
@@ -83,12 +84,30 @@ export function TerminalTopBar() {
   const defaultFontSize = useAppStore((s) => s.fontSize);
   const adjustTerminalFontSize = useAppStore((s) => s.adjustTerminalFontSize);
 
+  /** Delay before hiding overlay when mouse leaves, so user can move to panel. */
+  const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const terminals = useAppStore((s) => s.terminals);
   const activeTerminalId = useAppStore((s) => s.activeTerminalId);
   const activeTerminal = terminals.find((t) => t.id === activeTerminalId);
   // Zoom reflects the active terminal's own size (or the global default).
   const activeFontSize = activeTerminal?.fontSize ?? defaultFontSize;
   const zoomPct = Math.round((activeFontSize / DEFAULT_FONT_SIZE) * 100);
+
+  const handleLeftBtnEnter = () => {
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    if (!isLeftPanelVisible) setLeftPanelHovering(true);
+  };
+
+  const handleLeftBtnLeave = () => {
+    // Delay hiding so user can move mouse to the overlay panel
+    hoverTimeoutRef.current = setTimeout(() => {
+      setLeftPanelHovering(false);
+    }, 300);
+  };
 
   return (
     <TopBar
@@ -97,10 +116,8 @@ export function TerminalTopBar() {
           className={`topbar-btn ${isLeftPanelVisible ? 'active' : ''}`}
           title={isLeftPanelVisible ? '隐藏侧边栏' : '显示侧边栏'}
           onClick={toggleLeftPanel}
-          onMouseEnter={() => {
-            if (!isLeftPanelVisible) setLeftPanelHovering(true);
-          }}
-          onMouseLeave={() => setLeftPanelHovering(false)}
+          onMouseEnter={handleLeftBtnEnter}
+          onMouseLeave={handleLeftBtnLeave}
         >
           <PanelLeft size={16} strokeWidth={1.75} />
         </button>

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useAppStore } from '@/stores/appStore';
 import { Resizer } from './Resizer';
 import { LeftPanel } from './LeftPanel';
@@ -17,6 +17,23 @@ export function AppLayout() {
   const setRightWidth = useAppStore((s) => s.setRightWidth);
   const persistPanelWidths = useAppStore((s) => s.persistPanelWidths);
   const setLeftPanelHovering = useAppStore((s) => s.setLeftPanelHovering);
+
+  /** Delay before hiding overlay when mouse leaves the panel. */
+  const overlayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleOverlayEnter = () => {
+    if (overlayTimeoutRef.current) {
+      clearTimeout(overlayTimeoutRef.current);
+      overlayTimeoutRef.current = null;
+    }
+    setLeftPanelHovering(true);
+  };
+
+  const handleOverlayLeave = () => {
+    overlayTimeoutRef.current = setTimeout(() => {
+      setLeftPanelHovering(false);
+    }, 300);
+  };
 
   useEffect(() => {
     document.documentElement.setAttribute(
@@ -47,8 +64,8 @@ export function AppLayout() {
           <div
             className="panel-sidebar panel-sidebar-overlay"
             style={{ width: leftWidth }}
-            onMouseEnter={() => setLeftPanelHovering(true)}
-            onMouseLeave={() => setLeftPanelHovering(false)}
+            onMouseEnter={handleOverlayEnter}
+            onMouseLeave={handleOverlayLeave}
           >
             <LeftPanel />
           </div>

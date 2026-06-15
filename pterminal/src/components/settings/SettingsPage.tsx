@@ -336,7 +336,7 @@ function SocksProxySection() {
             onChange={(v) => setCfg((c) => ({ ...c, applyAi: v }))}
           />
           <ProxyCheckbox
-            label="HTTP 流量走代理"
+            label="终端命令走代理"
             checked={cfg.applyHttp}
             onChange={(v) => setCfg((c) => ({ ...c, applyHttp: v }))}
           />
@@ -506,21 +506,17 @@ function ModelSettings() {
                 // Preset common base URLs when the field is empty or matches a known preset.
                 const presets: Record<string, string> = {
                   openai: 'https://api.openai.com',
-                  anthropic: 'https://api.anthropic.com',
                   ollama: 'http://localhost:11434',
                   deepseek: 'https://api.deepseek.com',
-                  moonshot: 'https://api.moonshot.cn',
                 };
                 if (presets[p] && (!baseUrl || Object.values(presets).includes(baseUrl))) {
                   setBaseUrl(presets[p]);
                 }
               }}
             >
-              <option value="openai">OpenAI</option>
-              <option value="anthropic">Anthropic (Claude)</option>
+              <option value="openai">OpenAI 兼容</option>
               <option value="ollama">Ollama (本地)</option>
               <option value="deepseek">DeepSeek</option>
-              <option value="moonshot">Moonshot (Kimi)</option>
             </select>
             <span className="field-chevron">
               <ChevronDown size={16} strokeWidth={1.75} />
@@ -569,8 +565,8 @@ function ModelSettings() {
             placeholder={
               provider === 'ollama'
                 ? 'llama3.2'
-                : provider === 'anthropic'
-                  ? 'claude-3-5-sonnet-latest'
+                : provider === 'deepseek'
+                  ? 'deepseek-chat'
                   : 'gpt-4o-mini'
             }
             style={fieldStyle}
