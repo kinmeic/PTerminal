@@ -22,6 +22,8 @@ export function AIChatPanel() {
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  /** Track when IME composition ended (to block Enter that confirms IME selection). */
+  const compositionEndTimestampRef = useRef(0);
 
   /** Resize the textarea to fit its content, clamped to a max height (≈6 lines).
    * Called on every input change and after the field is cleared on send. */
@@ -137,8 +139,12 @@ export function AIChatPanel() {
           ref={textareaRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
+          onCompositionEnd={() => { compositionEndTimestampRef.current = Date.now(); }}
           onKeyDown={(e) => {
             // Enter sends; Shift+Enter (and Ctrl/Cmd+Enter) inserts a newline.
+            // Skip if IME is composing or just ended (Enter confirms IME selection).
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+            if (Date.now() - compositionEndTimestampRef.current < 100) return;
             if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
               e.preventDefault();
               if (!isAiStreaming && input.trim()) {
