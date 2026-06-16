@@ -1,0 +1,63 @@
+name: Release macOS DMGs
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build ${{ matrix.label }} DMG
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Apple Silicon
+            target: aarch64-apple-darwin
+          - label: Intel
+            target: x86_64-apple-darwin
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: pterminal/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: pterminal/src-tauri -> target
+
+      - name: Install frontend dependencies
+        working-directory: pterminal
+        run: npm ci
+
+      - name: Build and publish DMG
+        uses: tauri-apps/tauri-action@v0.6.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: pterminal
+          tagName: v__VERSION__
+          releaseName: PTerminal v__VERSION__
+          releaseBody: macOS DMG builds for Apple Silicon and Intel Macs.
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: false
+          args: --target ${{ matrix.target }} --bundles dmg
+          assetNamePattern: PTerminal-v[version]-[platform]-[arch][ext]
