@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react';
-import { useRef } from 'react';
 import { PanelLeft, PanelRight, Sun, Moon, ArrowLeft, ZoomIn, ZoomOut } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useAppStore } from '@/stores/appStore';
@@ -78,14 +77,13 @@ export function TerminalTopBar() {
   const toggleLeftPanel = useAppStore((s) => s.toggleLeftPanel);
   const toggleRightPanel = useAppStore((s) => s.toggleRightPanel);
   const setLeftPanelHovering = useAppStore((s) => s.setLeftPanelHovering);
+  const scheduleLeftPanelHoverHide = useAppStore((s) => s.scheduleLeftPanelHoverHide);
+  const cancelLeftPanelHoverHide = useAppStore((s) => s.cancelLeftPanelHoverHide);
   const isDarkMode = useAppStore((s) => s.isDarkMode);
   const toggleDarkMode = useAppStore((s) => s.toggleDarkMode);
 
   const defaultFontSize = useAppStore((s) => s.fontSize);
   const adjustTerminalFontSize = useAppStore((s) => s.adjustTerminalFontSize);
-
-  /** Delay before hiding overlay when mouse leaves, so user can move to panel. */
-  const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const terminals = useAppStore((s) => s.terminals);
   const activeTerminalId = useAppStore((s) => s.activeTerminalId);
@@ -95,18 +93,14 @@ export function TerminalTopBar() {
   const zoomPct = Math.round((activeFontSize / DEFAULT_FONT_SIZE) * 100);
 
   const handleLeftBtnEnter = () => {
-    if (hoverTimeoutRef.current) {
-      clearTimeout(hoverTimeoutRef.current);
-      hoverTimeoutRef.current = null;
-    }
+    // Cancel any pending hide so re-entering the button keeps the overlay open.
+    cancelLeftPanelHoverHide();
     if (!isLeftPanelVisible) setLeftPanelHovering(true);
   };
 
   const handleLeftBtnLeave = () => {
-    // Delay hiding so user can move mouse to the overlay panel
-    hoverTimeoutRef.current = setTimeout(() => {
-      setLeftPanelHovering(false);
-    }, 300);
+    // Delay hiding; the overlay's onMouseEnter will cancel this if reached.
+    scheduleLeftPanelHoverHide();
   };
 
   return (

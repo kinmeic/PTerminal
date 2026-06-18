@@ -123,8 +123,15 @@ interface AppState {
   toggleDarkMode: () => void;
   toggleRightPanel: () => void;
   toggleLeftPanel: () => void;
-  /** Show/hide the left panel overlay (hover preview). */
+  /** Show/hide the left panel overlay (hover preview). Clears any pending
+   *  hide timer so a direct show is never cancelled by a stale leave. */
   setLeftPanelHovering: (hovering: boolean) => void;
+  /** Arm (or replace) the shared hide timer for the left panel overlay. The
+   *  timer is shared with the toggle button so a pending hide started when
+   *  leaving the button is cancelled once the mouse reaches the overlay. */
+  scheduleLeftPanelHoverHide: (delayMs?: number) => void;
+  /** Cancel the shared hide timer (e.g. when the mouse enters the overlay). */
+  cancelLeftPanelHoverHide: () => void;
   setAiMessages: (messages: AIMessage[]) => void;
   /** Restore saved UI state (panel visibility, theme, widths) on startup. */
   loadUiState: () => Promise<void>;
@@ -157,6 +164,22 @@ const MIN_PANEL_WIDTH = 240;
 const MAX_PANEL_WIDTH = 350;
 const DEFAULT_LEFT_WIDTH = 280;
 const DEFAULT_RIGHT_WIDTH = 320;
+
+/**
+ * Shared hide-timer for the left-panel hover overlay. It lives at module scope
+ * (not in reactive state) so BOTH the top-bar toggle button and the overlay
+ * itself coordinate against the same pending hide — leaving the button arms
+ * it, entering the overlay cancels it. This is what keeps the overlay open as
+ * the mouse travels from the button down onto it.
+ */
+let leftPanelHoverTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearLeftPanelHoverTimer() {
+  if (leftPanelHoverTimer) {
+    clearTimeout(leftPanelHoverTimer);
+    leftPanelHoverTimer = null;
+  }
+}
 
 /**
  * Apply a dark/light theme to the document + re-theme every live xterm.
@@ -669,10 +692,27 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => {
       const next = !state.isLeftPanelVisible;
       void settingsService.set(SETTING_KEYS.leftPanelVisible, next ? '1' : '0').catch(() => {});
+      // Expanding the panel makes the hover overlay moot; drop any pending hide.
+      if (next) clearLeftPanelHoverTimer();
       return { isLeftPanelVisible: next, isLeftPanelHovering: false };
     }),
 
-  setLeftPanelHovering: (hovering) => set({ isLeftPanelHovering: hovering }),
+  setLeftPanelHovering: (hovering) => {
+    clearLeftPanelHoverTimer();
+    set({ isLeftPanelHovering: hovering });
+  },
+
+  scheduleLeftPanelHoverHide: (delayMs) => {
+    clearLeftPanelHoverTimer();
+    leftPanelHoverTimer = setTimeout(() => {
+      leftPanelHoverTimer = null;
+      set({ isLeftPanelHovering: false });
+    }, delayMs ?? 300);
+  },
+
+  cancelLeftPanelHoverHide: () => {
+    clearLeftPanelHoverTimer();
+  },
 
   // Persist the current panel widths. Called on drag end (mouseup) rather than
   // every mousemove to avoid hammering SQLite during a resize (需求 2).

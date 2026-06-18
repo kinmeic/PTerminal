@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { useAppStore } from '@/stores/appStore';
 import { Resizer } from './Resizer';
 import { LeftPanel } from './LeftPanel';
@@ -17,22 +17,18 @@ export function AppLayout() {
   const setRightWidth = useAppStore((s) => s.setRightWidth);
   const persistPanelWidths = useAppStore((s) => s.persistPanelWidths);
   const setLeftPanelHovering = useAppStore((s) => s.setLeftPanelHovering);
-
-  /** Delay before hiding overlay when mouse leaves the panel. */
-  const overlayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleLeftPanelHoverHide = useAppStore((s) => s.scheduleLeftPanelHoverHide);
+  const cancelLeftPanelHoverHide = useAppStore((s) => s.cancelLeftPanelHoverHide);
 
   const handleOverlayEnter = () => {
-    if (overlayTimeoutRef.current) {
-      clearTimeout(overlayTimeoutRef.current);
-      overlayTimeoutRef.current = null;
-    }
+    // Cancels the hide the button armed on leave — this is what keeps the
+    // overlay open as the mouse travels from the button onto it.
+    cancelLeftPanelHoverHide();
     setLeftPanelHovering(true);
   };
 
   const handleOverlayLeave = () => {
-    overlayTimeoutRef.current = setTimeout(() => {
-      setLeftPanelHovering(false);
-    }, 300);
+    scheduleLeftPanelHoverHide();
   };
 
   useEffect(() => {
