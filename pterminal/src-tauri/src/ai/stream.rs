@@ -19,14 +19,26 @@ pub enum StreamEvent {
 /// Request a streaming chat completion and yield text deltas.
 ///
 /// Dispatches to the OpenAI-compatible or Anthropic protocol based on `provider`.
+/// `max_tokens` optionally caps the response length (used by autocomplete to
+/// keep replies short and fast).
 pub async fn stream_chat(
     client: &Client,
     cfg: &crate::ai::AiConfig,
     messages: Vec<ChatMessage>,
 ) -> anyhow::Result<DeltaStream> {
+    stream_chat_with_options(client, cfg, messages, None).await
+}
+
+/// Like `stream_chat` but with an optional `max_tokens` cap on the reply.
+pub async fn stream_chat_with_options(
+    client: &Client,
+    cfg: &crate::ai::AiConfig,
+    messages: Vec<ChatMessage>,
+    max_tokens: Option<u32>,
+) -> anyhow::Result<DeltaStream> {
     match cfg.provider {
-        Provider::OpenAI => stream_openai(client, cfg, messages).await,
-        Provider::Anthropic => stream_anthropic(client, cfg, messages).await,
+        Provider::OpenAI => stream_openai(client, cfg, messages, max_tokens).await,
+        Provider::Anthropic => stream_anthropic(client, cfg, messages, max_tokens).await,
     }
 }
 
@@ -36,6 +48,7 @@ async fn stream_openai(
     client: &Client,
     cfg: &crate::ai::AiConfig,
     messages: Vec<ChatMessage>,
+    max_tokens: Option<u32>,
 ) -> anyhow::Result<DeltaStream> {
     // DeepSeek API doesn't use /v1 prefix
     let path = if cfg.provider_id == "deepseek" {
@@ -44,11 +57,14 @@ async fn stream_openai(
         "/v1/chat/completions"
     };
     let url = join_api_url(&cfg.base_url, path);
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
         "model": cfg.model,
         "messages": messages,
         "stream": true,
     });
+    if let Some(n) = max_tokens {
+        body["max_tokens"] = serde_json::json!(n);
+    }
 
     let mut req = client.post(&url).json(&body);
     if let Some(key) = &cfg.api_key {
@@ -109,6 +125,7 @@ async fn stream_anthropic(
     client: &Client,
     cfg: &crate::ai::AiConfig,
     messages: Vec<ChatMessage>,
+    max_tokens: Option<u32>,
 ) -> anyhow::Result<DeltaStream> {
     let url = join_api_url(&cfg.base_url, "/v1/messages");
     // Anthropic separates the system prompt from the message list.
@@ -130,7 +147,7 @@ async fn stream_anthropic(
 
     let body = serde_json::json!({
         "model": cfg.model,
-        "max_tokens": 2048,
+        "max_tokens": max_tokens.unwrap_or(2048),
         "system": system,
         "messages": convo,
         "stream": true,

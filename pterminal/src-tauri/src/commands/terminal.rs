@@ -1,13 +1,16 @@
 use crate::db::DbConn;
 use crate::models::{
-    PinTerminalInput, SetFontSizeInput, SpawnTerminalInput, TerminalDataPayload, TerminalDto,
-    TerminalExitPayload,
+    LocalCompletionDto, LocalCompletionInput, PinTerminalInput, SetFontSizeInput,
+    SpawnTerminalInput, TerminalDataPayload, TerminalDto, TerminalExitPayload,
 };
 use crate::state::{AppState, TerminalSession};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use rusqlite::params;
+use std::collections::HashSet;
 use std::io::Read;
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::RawFd;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -25,6 +28,145 @@ const OUTPUT_FLUSH_BYTES: usize = 64 * 1024;
 /// wakes up to re-check the cancellation flag (H6). 2s keeps the thread
 /// responsive to `terminal_kill` without busy-spinning.
 const READ_POLL_TIMEOUT_MS: libc::c_int = 2000;
+const LOCAL_COMPLETION_LIMIT: usize = 12;
+const SHELL_BUILTINS: &[&str] = &[
+    "alias",
+    "bg",
+    "bindkey",
+    "break",
+    "builtin",
+    "cd",
+    "command",
+    "compdef",
+    "complete",
+    "continue",
+    "declare",
+    "dirs",
+    "disown",
+    "echo",
+    "eval",
+    "exec",
+    "exit",
+    "export",
+    "false",
+    "fc",
+    "fg",
+    "getopts",
+    "hash",
+    "history",
+    "jobs",
+    "kill",
+    "let",
+    "local",
+    "logout",
+    "popd",
+    "printf",
+    "pushd",
+    "pwd",
+    "read",
+    "readonly",
+    "return",
+    "set",
+    "shift",
+    "source",
+    "test",
+    "times",
+    "trap",
+    "true",
+    "type",
+    "typeset",
+    "ulimit",
+    "umask",
+    "unalias",
+    "unset",
+    "wait",
+    "which",
+];
+
+const COMMON_COMMANDS: &[&str] = &[
+    "apt",
+    "apt-get",
+    "awk",
+    "bash",
+    "cat",
+    "chmod",
+    "chown",
+    "cp",
+    "curl",
+    "df",
+    "docker",
+    "docker-compose",
+    "du",
+    "find",
+    "grep",
+    "head",
+    "htop",
+    "journalctl",
+    "less",
+    "ln",
+    "ls",
+    "mkdir",
+    "mv",
+    "nano",
+    "netstat",
+    "nginx",
+    "ping",
+    "ps",
+    "python",
+    "python3",
+    "rm",
+    "rsync",
+    "scp",
+    "sed",
+    "service",
+    "sh",
+    "ssh",
+    "sudo",
+    "systemctl",
+    "tail",
+    "tar",
+    "top",
+    "touch",
+    "tree",
+    "ufw",
+    "unzip",
+    "vim",
+    "wget",
+    "which",
+    "zip",
+];
+
+const GIT_SUBCOMMANDS: &[&str] = &[
+    "add",
+    "am",
+    "bisect",
+    "branch",
+    "checkout",
+    "cherry-pick",
+    "clean",
+    "clone",
+    "commit",
+    "diff",
+    "fetch",
+    "grep",
+    "init",
+    "log",
+    "merge",
+    "mv",
+    "pull",
+    "push",
+    "rebase",
+    "remote",
+    "reset",
+    "restore",
+    "revert",
+    "rm",
+    "show",
+    "stash",
+    "status",
+    "switch",
+    "tag",
+];
 
 /// Spawn a new PTY-backed shell and persist its configuration to the database.
 #[tauri::command]
@@ -331,6 +473,35 @@ pub fn terminal_write(
     Ok(())
 }
 
+/// Fast local autocomplete that does not call the AI model and does not write to
+/// the active PTY. This intentionally mirrors the first layer of shell Tab
+/// completion: executable names, shell builtins, a few high-value subcommands,
+/// and filesystem paths.
+#[tauri::command]
+pub fn terminal_local_completions(
+    state: State<'_, AppState>,
+    input: LocalCompletionInput,
+) -> Result<Vec<LocalCompletionDto>, String> {
+    let cwd = terminal_cwd(&state, &input.terminal_id);
+    let parsed = ParsedInput::new(&input.partial_cmd);
+    let limit = input
+        .limit
+        .map(|n| n.max(1).min(LOCAL_COMPLETION_LIMIT))
+        .unwrap_or(LOCAL_COMPLETION_LIMIT);
+
+    let mut out: Vec<LocalCompletionDto> = Vec::new();
+
+    if parsed.is_command_position {
+        collect_command_name_completions(&parsed, limit, &mut out);
+        collect_path_completions(&parsed, &cwd, true, limit, &mut out);
+    } else {
+        collect_git_completions(&parsed, limit, &mut out);
+        collect_path_completions(&parsed, &cwd, false, limit, &mut out);
+    }
+
+    dedupe_and_rank(out, limit)
+}
+
 /// Resize a terminal's PTY.
 #[tauri::command]
 pub fn terminal_resize(
@@ -553,6 +724,327 @@ fn fetch_terminal(state: &AppState, id: &str) -> Result<TerminalDto, String> {
         },
     )
     .map_err(|e| e.to_string())
+}
+
+fn terminal_cwd(state: &AppState, terminal_id: &str) -> String {
+    state
+        .db
+        .get()
+        .ok()
+        .and_then(|conn| {
+            conn.query_row(
+                "SELECT cwd FROM terminals WHERE id = ?1",
+                params![terminal_id],
+                |row| row.get::<_, String>(0),
+            )
+            .ok()
+        })
+        .filter(|cwd| !cwd.trim().is_empty())
+        .unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/".to_string()))
+}
+
+#[derive(Debug)]
+struct ParsedInput<'a> {
+    original: &'a str,
+    token_start: usize,
+    current_token: &'a str,
+    command: &'a str,
+    arg_index: usize,
+    is_command_position: bool,
+}
+
+impl<'a> ParsedInput<'a> {
+    fn new(original: &'a str) -> Self {
+        let token_start = current_token_start(original);
+        let current_token = &original[token_start..];
+        let before_token = &original[..token_start];
+        let trimmed = original.trim_start();
+        let mut parts = trimmed.split_whitespace();
+        let command = parts.next().unwrap_or("");
+        let token_count = if trimmed.is_empty() {
+            0
+        } else {
+            trimmed.split_whitespace().count()
+        };
+        let ends_with_space = original.chars().last().is_some_and(char::is_whitespace);
+        let arg_index = if command.is_empty() {
+            0
+        } else if ends_with_space {
+            token_count
+        } else {
+            token_count.saturating_sub(1)
+        };
+
+        Self {
+            original,
+            token_start,
+            current_token,
+            command,
+            arg_index,
+            is_command_position: before_token.trim().is_empty(),
+        }
+    }
+
+    fn replace_current_token(&self, replacement: &str) -> String {
+        format!("{}{}", &self.original[..self.token_start], replacement)
+    }
+}
+
+fn current_token_start(s: &str) -> usize {
+    if s.is_empty() {
+        return 0;
+    }
+
+    let mut token_start = 0;
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    for (idx, ch) in s.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+        if ch == '\'' || ch == '"' {
+            quote = Some(ch);
+            continue;
+        }
+        if ch.is_whitespace() {
+            token_start = idx + ch.len_utf8();
+        }
+    }
+    token_start
+}
+
+fn collect_command_name_completions(
+    parsed: &ParsedInput<'_>,
+    limit: usize,
+    out: &mut Vec<LocalCompletionDto>,
+) {
+    let prefix = parsed.current_token;
+    if prefix.is_empty() || prefix.contains('/') || prefix.starts_with('-') {
+        return;
+    }
+
+    for name in SHELL_BUILTINS.iter().copied() {
+        if name.starts_with(prefix) {
+            push_completion(out, parsed.replace_current_token(name), "command", "builtin", 92);
+        }
+    }
+
+    for name in COMMON_COMMANDS.iter().copied() {
+        if name.starts_with(prefix) {
+            push_completion(out, parsed.replace_current_token(name), "command", "common", 78);
+        }
+    }
+
+    if let Some(paths) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&paths) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                if out.len() >= limit * 4 {
+                    return;
+                }
+                let name = entry.file_name().to_string_lossy().to_string();
+                if !name.starts_with(prefix) {
+                    continue;
+                }
+                if !is_executable_file(&entry.path()) {
+                    continue;
+                }
+                push_completion(out, parsed.replace_current_token(&name), "command", "path", 84);
+            }
+        }
+    }
+}
+
+fn collect_git_completions(parsed: &ParsedInput<'_>, limit: usize, out: &mut Vec<LocalCompletionDto>) {
+    if parsed.command != "git" || parsed.arg_index != 1 {
+        return;
+    }
+    let prefix = parsed.current_token;
+    for sub in GIT_SUBCOMMANDS.iter().copied() {
+        if out.len() >= limit * 3 {
+            return;
+        }
+        if sub.starts_with(prefix) {
+            push_completion(
+                out,
+                parsed.replace_current_token(sub),
+                "subcommand",
+                "git",
+                88,
+            );
+        }
+    }
+}
+
+fn collect_path_completions(
+    parsed: &ParsedInput<'_>,
+    cwd: &str,
+    executable_only: bool,
+    limit: usize,
+    out: &mut Vec<LocalCompletionDto>,
+) {
+    let token = parsed.current_token;
+    if executable_only && !token.contains('/') {
+        return;
+    }
+
+    let (dir_part, name_prefix) = split_path_token(token);
+    let search_dir = resolve_completion_dir(cwd, dir_part);
+    let Ok(entries) = std::fs::read_dir(&search_dir) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        if out.len() >= limit * 4 {
+            return;
+        }
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        let is_dir = file_type.is_dir();
+        if executable_only && !is_dir && !is_executable_file(&path) {
+            continue;
+        }
+
+        let raw_name = entry.file_name().to_string_lossy().to_string();
+        if raw_name.starts_with('.') && !name_prefix.starts_with('.') {
+            continue;
+        }
+        if !raw_name.starts_with(name_prefix) {
+            continue;
+        }
+
+        let mut replacement = String::new();
+        replacement.push_str(dir_part);
+        replacement.push_str(&escape_shell_token_fragment(&raw_name));
+        if is_dir {
+            replacement.push('/');
+        }
+
+        push_completion(
+            out,
+            parsed.replace_current_token(&replacement),
+            if is_dir { "directory" } else { "path" },
+            if executable_only { "path-command" } else { "filesystem" },
+            if executable_only { 80 } else if is_dir { 74 } else { 68 },
+        );
+    }
+}
+
+fn split_path_token(token: &str) -> (&str, &str) {
+    match token.rfind('/') {
+        Some(idx) => (&token[..=idx], &token[idx + 1..]),
+        None => ("", token),
+    }
+}
+
+fn resolve_completion_dir(cwd: &str, dir_part: &str) -> PathBuf {
+    let unescaped = unescape_shell_token_fragment(dir_part);
+    if unescaped.starts_with("~/") || unescaped == "~" {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+        let rest = unescaped.trim_start_matches('~').trim_start_matches('/');
+        return Path::new(&home).join(rest);
+    }
+    let path = PathBuf::from(&unescaped);
+    if path.is_absolute() {
+        path
+    } else {
+        Path::new(cwd).join(path)
+    }
+}
+
+fn is_executable_file(path: &Path) -> bool {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    meta.is_file() && (meta.permissions().mode() & 0o111 != 0)
+}
+
+fn escape_shell_token_fragment(s: &str) -> String {
+    let mut out = String::new();
+    for ch in s.chars() {
+        match ch {
+            ' ' | '\\' | '\'' | '"' | '`' | '$' | '&' | '|' | ';' | '<' | '>' | '(' | ')' | '['
+            | ']' | '{' | '}' | '*' | '?' | '!' | '#' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+fn unescape_shell_token_fragment(s: &str) -> String {
+    let mut out = String::new();
+    let mut escaped = false;
+    for ch in s.chars() {
+        if escaped {
+            out.push(ch);
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else {
+            out.push(ch);
+        }
+    }
+    if escaped {
+        out.push('\\');
+    }
+    out
+}
+
+fn push_completion(
+    out: &mut Vec<LocalCompletionDto>,
+    text: String,
+    kind: &str,
+    source: &str,
+    score: i64,
+) {
+    out.push(LocalCompletionDto {
+        text,
+        kind: kind.to_string(),
+        source: source.to_string(),
+        score,
+    });
+}
+
+fn dedupe_and_rank(
+    mut items: Vec<LocalCompletionDto>,
+    limit: usize,
+) -> Result<Vec<LocalCompletionDto>, String> {
+    items.sort_by(|a, b| {
+        b.score
+            .cmp(&a.score)
+            .then_with(|| a.text.len().cmp(&b.text.len()))
+            .then_with(|| a.text.cmp(&b.text))
+    });
+
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for item in items {
+        if seen.insert(item.text.clone()) {
+            out.push(item);
+            if out.len() >= limit {
+                break;
+            }
+        }
+    }
+    Ok(out)
 }
 
 fn next_sort_order(state: &AppState) -> i64 {

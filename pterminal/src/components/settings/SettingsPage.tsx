@@ -120,9 +120,13 @@ function GeneralSettings() {
   const fontFamily = useAppStore((s) => s.fontFamily);
   const fontSize = useAppStore((s) => s.fontSize);
   const lineHeight = useAppStore((s) => s.lineHeight);
+  const terminalAutocompleteEnabled = useAppStore((s) => s.terminalAutocompleteEnabled);
+  const aiAutocompleteEnabled = useAppStore((s) => s.autocompleteEnabled);
   const setTerminalFontFamily = useAppStore((s) => s.setTerminalFontFamily);
   const setDefaultFontSize = useAppStore((s) => s.setDefaultFontSize);
   const setLineHeight = useAppStore((s) => s.setLineHeight);
+  const setTerminalAutocompleteEnabled = useAppStore((s) => s.setTerminalAutocompleteEnabled);
+  const setAutocompleteEnabled = useAppStore((s) => s.setAutocompleteEnabled);
 
   const labelStyle: React.CSSProperties = {
     fontSize: 12,
@@ -228,6 +232,26 @@ function GeneralSettings() {
           </div>
           <div style={hintStyle}>
             终端行与行之间的间距倍数，1.0 为紧凑无额外间距。
+          </div>
+        </div>
+
+        <div>
+          <label style={labelStyle}>终端补全（实验性，不适合SSH使用）</label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <SettingsCheckbox
+              label="启用终端补全"
+              checked={terminalAutocompleteEnabled}
+              onChange={(checked) => void setTerminalAutocompleteEnabled(checked)}
+            />
+            <SettingsCheckbox
+              label="启用 AI 增强补全"
+              checked={aiAutocompleteEnabled}
+              disabled={!terminalAutocompleteEnabled}
+              onChange={(checked) => void setAutocompleteEnabled(checked)}
+            />
+          </div>
+          <div style={hintStyle}>
+            终端补全包含本地命令、路径与常用子命令；AI 增强只在需要时补充更完整的命令建议。
           </div>
         </div>
       </div>
@@ -359,14 +383,16 @@ function SocksProxySection() {
   );
 }
 
-function ProxyCheckbox({
+function SettingsCheckbox({
   label,
   checked,
   onChange,
+  disabled = false,
 }: {
   label: string;
   checked: boolean;
   onChange: (v: boolean) => void;
+  disabled?: boolean;
 }) {
   return (
     <label
@@ -374,15 +400,17 @@ function ProxyCheckbox({
         display: 'flex',
         alignItems: 'center',
         gap: 8,
-        cursor: 'pointer',
+        cursor: disabled ? 'not-allowed' : 'pointer',
         fontSize: 13,
         color: 'var(--color-text-primary)',
+        opacity: disabled ? 0.55 : 1,
         userSelect: 'none',
       }}
     >
       <input
         type="checkbox"
         checked={checked}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
         style={{ width: 15, height: 15, accentColor: 'var(--color-accent)' }}
       />
@@ -390,6 +418,8 @@ function ProxyCheckbox({
     </label>
   );
 }
+
+const ProxyCheckbox = SettingsCheckbox;
 
 function ModelSettings() {
   const aiConfig = useAppStore((s) => s.aiConfig);

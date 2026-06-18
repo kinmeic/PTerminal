@@ -3,6 +3,8 @@ import { Terminal } from '@xterm/xterm';
 import { terminalRegistry } from '@/services/terminalRegistry';
 import { terminalService } from '@/services/terminalService';
 import { useAppStore } from '@/stores/appStore';
+import { useTerminalAutocomplete } from '@/hooks/useTerminalAutocomplete';
+import { TerminalAutocomplete } from './TerminalAutocomplete';
 import '@xterm/xterm/css/xterm.css';
 
 interface TerminalViewProps {
@@ -16,6 +18,14 @@ interface TerminalViewProps {
  * The xterm instance lives in the registry (one per terminal id) and is reused
  * across mounts. `onData` is therefore registered at most once per instance
  * via a guard so re-mounts never produce duplicate keystrokes.
+ *
+ * AI inline autocomplete is layered on top:
+ * - The PTY writer callback ALSO feeds keystrokes to the autocomplete hook so
+ *   it can model the current input line. The hook does NOT write to the PTY
+ *   itself, so each keystroke is written exactly once.
+ * - A capture-phase keydown listener intercepts Tab / ArrowRight (accept) and
+ *   Escape (dismiss) when a suggestion is visible, preventing the keystroke
+ *   from reaching xterm/the shell.
  */
 export function TerminalView({ terminalId }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -28,6 +38,36 @@ export function TerminalView({ terminalId }: TerminalViewProps) {
   const globalFontSize = useAppStore((s) => s.fontSize);
   const fontSize = terminal?.fontSize ?? globalFontSize;
 
+  // AI autocomplete hook. `handleInput` is read-only (no PTY write); `accept`
+  // writes the selected suggestion suffix to the PTY.
+  const {
+    state: autocompleteState,
+    handleInput,
+    accept,
+    dismiss,
+    selectNext,
+    selectPrev,
+  } = useTerminalAutocomplete(terminalId);
+
+  // Keep the latest callbacks/visible in refs so the capture-phase keydown
+  // listener (registered once) always sees fresh values.
+  const handleInputRef = useRef(handleInput);
+  const acceptRef = useRef(accept);
+  const dismissRef = useRef(dismiss);
+  const selectNextRef = useRef(selectNext);
+  const selectPrevRef = useRef(selectPrev);
+  const visibleRef = useRef(autocompleteState.visible);
+  handleInputRef.current = handleInput;
+  acceptRef.current = accept;
+  dismissRef.current = dismiss;
+  selectNextRef.current = selectNext;
+  selectPrevRef.current = selectPrev;
+  visibleRef.current = autocompleteState.visible;
+
+  useEffect(() => {
+    terminalRegistry.applyFont(terminalId, fontFamily, fontSize);
+  }, [terminalId, fontFamily, fontSize]);
+
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -37,8 +77,16 @@ export function TerminalView({ terminalId }: TerminalViewProps) {
 
     // Bind the PTY writer exactly once per xterm instance. The registry tracks
     // whether input forwarding has been wired so re-mounts are no-ops.
+    // This is the ONLY path that writes keystrokes to the shell.
     terminalRegistry.bindInput(terminalId, (data) => {
       void terminalService.write(terminalId, data);
+    });
+
+    // Subscribe the autocomplete hook as a READ-ONLY observer of the same
+    // keystroke stream. The hook does NOT write to the PTY — that would
+    // duplicate every keystroke. onInput returns an unsubscribe for cleanup.
+    const unsubscribeInput = terminalRegistry.onInput(terminalId, (data) => {
+      handleInputRef.current(data);
     });
 
     terminalRegistry.attach(terminalId, container);
@@ -68,25 +116,67 @@ export function TerminalView({ terminalId }: TerminalViewProps) {
     resizeObserver.observe(container);
     window.addEventListener('resize', scheduleResize);
 
+    // Intercept navigation keys at the capture phase so we can control the
+    // autocomplete suggestion/menu before xterm/the shell sees the key.
+    // Only active while a suggestion is visible.
+    const onKeyDownCapture = (e: KeyboardEvent) => {
+      if (terminalRegistry.isSensitiveInputPrompt(terminalId)) return;
+      if (!visibleRef.current) return;
+      const keys = ['Tab', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Escape'];
+      if (!keys.includes(e.key)) return;
+      // Ignore if the user is holding modifiers (allow Cmd+Tab, Ctrl+Tab, etc.).
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      e.preventDefault();
+      e.stopPropagation();
+      switch (e.key) {
+        case 'Escape':
+          dismissRef.current();
+          break;
+        case 'ArrowUp':
+          selectPrevRef.current();
+          break;
+        case 'ArrowDown':
+          selectNextRef.current();
+          break;
+        default: // Tab, ArrowRight
+          acceptRef.current();
+      }
+    };
+    container.addEventListener('keydown', onKeyDownCapture, true);
+
     return () => {
       resizeObserver.disconnect();
       window.removeEventListener('resize', scheduleResize);
+      container.removeEventListener('keydown', onKeyDownCapture, true);
+      unsubscribeInput();
       if (raf) cancelAnimationFrame(raf);
       // NOTE: we intentionally do NOT dispose the xterm instance or unbind
       // input here — the instance persists across terminal switches so its
       // scrollback is preserved.
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [terminalId]);
 
   return (
     <div
       ref={containerRef}
-      className="h-full w-full"
+      className="h-full w-full relative"
       style={{
         padding: '4px 8px',
         backgroundColor: 'var(--color-terminal-bg)',
       }}
-    />
+    >
+      <TerminalAutocomplete
+        terminalId={terminalId}
+        suggestions={autocompleteState.suggestions}
+        selectedIndex={autocompleteState.selectedIndex}
+        visible={autocompleteState.visible}
+        loading={autocompleteState.loading}
+        currentInput={autocompleteState.currentInput}
+        cursorX={autocompleteState.cursorX}
+        cursorY={autocompleteState.cursorY}
+      />
+    </div>
   );
 }
 

@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
+  LocalCompletion,
   SpawnTerminalInput,
   Terminal,
   TerminalSize,
@@ -65,5 +66,14 @@ export const terminalService = {
   /** Set (or clear with null) a terminal's per-terminal font size override. */
   setFontSize(input: { id: string; fontSize: number | null }): Promise<Terminal> {
     return invoke<Terminal>('terminal_set_font_size', { input });
+  },
+
+  /** Fast non-AI autocomplete from PATH, builtins, subcommands, and files. */
+  localCompletions(input: {
+    terminalId: string;
+    partialCmd: string;
+    limit?: number;
+  }): Promise<LocalCompletion[]> {
+    return invoke<LocalCompletion[]>('terminal_local_completions', { input });
   },
 };

@@ -171,3 +171,23 @@ pub struct SetFontSizeInput {
     pub id: String,
     pub font_size: Option<i64>,
 }
+
+/// Input for fast, non-AI terminal autocomplete.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalCompletionInput {
+    pub terminal_id: String,
+    pub partial_cmd: String,
+    pub limit: Option<usize>,
+}
+
+/// A local autocomplete candidate. `text` is the full command line after
+/// applying the completion, matching the AI autocomplete contract.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalCompletionDto {
+    pub text: String,
+    pub kind: String,
+    pub source: String,
+    pub score: i64,
+}

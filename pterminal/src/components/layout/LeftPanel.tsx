@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { SshShortcuts } from '@/components/ssh/SshShortcuts';
+import { dismissTerminalAutocomplete } from '@/services/autocompleteEvents';
 import type { Terminal } from '@/types';
 
 /**
@@ -58,11 +59,14 @@ export function LeftPanel() {
       {/* Header */}
       <div className="panel-header justify-between">
         <span>Terminals</span>
-        <button
-          className="collapse-button"
-          title="New Terminal"
-          onClick={() => void createTerminal()}
-        >
+          <button
+            className="collapse-button"
+            title="New Terminal"
+            onClick={() => {
+              dismissTerminalAutocomplete();
+              void createTerminal();
+            }}
+          >
           <Plus size={16} strokeWidth={1.75} />
         </button>
       </div>

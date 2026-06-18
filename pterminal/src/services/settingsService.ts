@@ -30,4 +30,7 @@ export const SETTING_KEYS = {
   proxySocksUrl: 'proxy_socks_url',
   proxyApplyAi: 'proxy_apply_ai',
   proxyApplyHttp: 'proxy_apply_http',
+  // Terminal autocomplete toggles
+  terminalAutocompleteEnabled: 'terminal_autocomplete_enabled',
+  autocompleteEnabled: 'ai_autocomplete_enabled',
 } as const;

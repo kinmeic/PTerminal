@@ -3,6 +3,8 @@ use crate::db::DbConn;
 use crate::state::AppState;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::MutexGuard;
 use tauri::{AppHandle, Emitter, State};
 use tokio_util::sync::CancellationToken;
 
@@ -107,6 +109,16 @@ fn terminal_cwd(state: &AppState, terminal_id: &str) -> String {
     .unwrap_or_else(|_| ".".to_string())
 }
 
+fn lock_cancels(state: &AppState) -> MutexGuard<'_, HashMap<String, CancellationToken>> {
+    match state.cancels.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            log::error!("cancels lock poisoned — recovering");
+            poisoned.into_inner()
+        }
+    }
+}
+
 /// Run a streaming chat against the configured provider, emitting
 /// `ai-delta` / `ai-done` events. Persists both turns to `ai_messages`.
 ///
@@ -127,7 +139,7 @@ async fn run_stream(
     // Register a cancellation token for this turn. If the id is already in use
     // (frontend bug / reused id), cancel the old one and replace it.
     let cancel = {
-        let mut map = state.cancels.lock().expect("cancels lock poisoned");
+        let mut map = lock_cancels(&state);
         let token = CancellationToken::new();
         let token_clone = token.clone();
         map.insert(request_id.clone(), token);
@@ -136,7 +148,7 @@ async fn run_stream(
 
     // Always remove the token on exit so the map doesn't leak finished streams.
     let cleanup = |state: &AppState, id: &str| {
-        let mut map = state.cancels.lock().expect("cancels lock poisoned");
+        let mut map = lock_cancels(state);
         map.remove(id);
     };
 
@@ -319,12 +331,170 @@ pub async fn ai_explain(
 /// registered — the frontend may issue a cancel after the stream already ended.
 #[tauri::command]
 pub fn ai_cancel(state: State<'_, AppState>, request_id: String) -> Result<(), String> {
-    let map = state.cancels.lock().expect("cancels lock poisoned");
+    let map = lock_cancels(&state);
     if let Some(token) = map.get(&request_id) {
         token.cancel();
     }
     Ok(())
 }
+
+// ---- Autocomplete (non-persistent, lightweight) ---------------------------
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiAutocompleteInput {
+    pub terminal_id: String,
+    pub partial_cmd: String,
+    /// Client-generated id for this request, used to match a later `ai_cancel`.
+    pub request_id: String,
+    /// Optional snapshot of recent terminal output lines for context.
+    pub terminal_context: Option<String>,
+}
+
+/// Payload for the one-shot autocomplete result event.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutocompletePayload {
+    pub request_id: String,
+    pub terminal_id: String,
+    /// Parsed full-command completions (e.g. ["git status"]), or None on error.
+    pub suggestions: Option<Vec<String>>,
+    pub error: Option<String>,
+}
+
+/// One-shot (non-streaming) autocomplete request. Unlike chat/suggest/explain,
+/// this does NOT persist to the database and does NOT stream.
+///
+/// Why non-streaming: reasoning models (DeepSeek-reasoner, Qwen, etc.) emit
+/// hundreds of `<think>` deltas before the answer. Streaming them to the
+/// frontend forced complex incremental filtering and delta/done race
+/// conditions. A single shot lets us strip the whole `<think>` block on the
+/// Rust side and return just the clean completion text in one event.
+#[tauri::command]
+pub async fn ai_autocomplete(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: AiAutocompleteInput,
+) -> Result<(), String> {
+    let cwd = terminal_cwd(&state, &input.terminal_id);
+    let messages = prompt::autocomplete_messages(
+        &input.partial_cmd,
+        &cwd,
+        input.terminal_context.as_deref(),
+    );
+
+    let cfg = ai::load_config(&state.db);
+
+    // Register a cancellation token so ai_cancel can still abort the HTTP
+    // request if the user keeps typing. The non-streaming fetch is raced
+    // against the token below.
+    let cancel = {
+        let mut map = lock_cancels(&state);
+        let token = CancellationToken::new();
+        let token_clone = token.clone();
+        map.insert(input.request_id.clone(), token);
+        token_clone
+    };
+
+    let cleanup = |state: &AppState, id: &str| {
+        let mut map = lock_cancels(state);
+        map.remove(id);
+    };
+
+    let client = match state.http.read() {
+        Ok(guard) => guard.clone(),
+        Err(poisoned) => {
+            log::error!("http lock poisoned — recovering");
+            poisoned.into_inner().clone()
+        }
+    };
+
+    // Race the HTTP request against cancellation.
+    let result = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => {
+            // Cancelled — emit an empty result so the frontend clears state.
+            let _ = app.emit(
+                "ai-autocomplete-result",
+                AutocompletePayload {
+                    request_id: input.request_id.clone(),
+                    terminal_id: input.terminal_id.clone(),
+                    suggestions: None,
+                    error: Some("cancelled".to_string()),
+                },
+            );
+            cleanup(&state, &input.request_id);
+            return Ok(());
+        }
+        r = crate::ai::client::complete_once(&client, &cfg, messages, 128) => r,
+    };
+
+    let suggestions: Vec<String> = if result.ok {
+        let cleaned = crate::ai::client::strip_think_blocks(&result.text);
+        parse_suggestions(&cleaned)
+    } else {
+        Vec::new()
+    };
+
+    let _ = app.emit(
+        "ai-autocomplete-result",
+        AutocompletePayload {
+            request_id: input.request_id.clone(),
+            terminal_id: input.terminal_id.clone(),
+            suggestions: if result.ok { Some(suggestions) } else { None },
+            error: if result.ok { None } else { Some(result.message) },
+        },
+    );
+    cleanup(&state, &input.request_id);
+    Ok(())
+}
+
+/// Parse the model's reply into a list of full-command completions. Tries JSON
+/// array first (`["git status"]`); if that fails, splits on newlines/commas as a
+/// fallback so we still get usable suggestions from models that don't follow
+/// the JSON format.
+fn parse_suggestions(text: &str) -> Vec<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    // Try JSON array parse.
+    if trimmed.starts_with('[') {
+        if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(trimmed) {
+            let out: Vec<String> = arr
+                .iter()
+                .filter_map(|v| v.as_str().map(|s| s.trim().to_string()))
+                .filter(|s| !s.is_empty())
+                .take(5)
+                .collect();
+            if !out.is_empty() {
+                return out;
+            }
+        }
+    }
+    // Fallback: split on newlines, strip markdown list markers / quotes.
+    let fallback: Vec<String> = trimmed
+        .lines()
+        .map(|l| {
+            l.trim()
+                .trim_start_matches(|c| c == '-' || c == '*' || c == '•' || c == '"' || c == '\'')
+                .trim_end_matches('"')
+                .trim_end_matches('\'')
+                .trim()
+                .to_string()
+        })
+        .filter(|s| !s.is_empty() && !s.starts_with('['))
+        .take(5)
+        .collect();
+    if fallback.is_empty() {
+        // Last resort: the whole text as one suggestion.
+        vec![trimmed.to_string()]
+    } else {
+        fallback
+    }
+}
+
+// ---- Settings & Config ----------------------------------------------------
 
 /// Persist AI provider settings.
 #[tauri::command]

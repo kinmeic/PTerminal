@@ -162,7 +162,7 @@ pub async fn test_connection(client: &Client, cfg: &AiConfig) -> TestResult {
                             message: format!("连接成功（{}，模型 {}）", status, cfg.model),
                         }
                     } else {
-                        let body = resp.text().await.unwrap_or_default();
+                        let body = redact_sensitive(&resp.text().await.unwrap_or_default(), cfg.api_key.as_deref());
                         TestResult {
                             ok: false,
                             message: format!("HTTP {status}: {}", truncate(&body, 200)),
@@ -199,7 +199,7 @@ pub async fn test_connection(client: &Client, cfg: &AiConfig) -> TestResult {
                             message: format!("连接成功（{}，模型 {}）", status, cfg.model),
                         }
                     } else {
-                        let body = resp.text().await.unwrap_or_default();
+                        let body = redact_sensitive(&resp.text().await.unwrap_or_default(), cfg.api_key.as_deref());
                         TestResult {
                             ok: false,
                             message: format!("HTTP {status}: {}", truncate(&body, 200)),
@@ -222,4 +222,209 @@ fn truncate(s: &str, max: usize) -> String {
         let cut: String = s.chars().take(max).collect();
         format!("{cut}…")
     }
+}
+
+fn redact_sensitive(s: &str, api_key: Option<&str>) -> String {
+    let mut out = s.to_string();
+    if let Some(key) = api_key.filter(|key| !key.is_empty()) {
+        out = out.replace(key, "[REDACTED]");
+    }
+    out
+}
+
+/// Outcome of a one-shot (non-streaming) completion, used by autocomplete.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompleteOnceResult {
+    pub ok: bool,
+    /// The assistant's full text reply (reasoning blocks stripped by the caller).
+    pub text: String,
+    /// Error message when `ok` is false.
+    pub message: String,
+}
+
+/// Send a NON-streaming chat completion and return the full reply text.
+///
+/// Autocomplete uses this instead of streaming because reasoning models
+/// (DeepSeek-reasoner, etc.) emit hundreds of `<think>` deltas before the
+/// answer — streaming forces the frontend to filter them incrementally and
+/// invites delta/done race conditions. A single shot lets us strip the whole
+/// `<think>` block in one place and return just the clean answer.
+pub async fn complete_once(
+    client: &Client,
+    cfg: &AiConfig,
+    messages: Vec<crate::ai::ChatMessage>,
+    max_tokens: u32,
+) -> CompleteOnceResult {
+    match cfg.provider {
+        crate::ai::Provider::OpenAI => {
+            let path = if cfg.provider_id == "deepseek" {
+                "/chat/completions"
+            } else {
+                "/v1/chat/completions"
+            };
+            let url = join_api_url(&cfg.base_url, path);
+            let body = serde_json::json!({
+                "model": cfg.model,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "stream": false,
+            });
+            let mut req = client.post(&url).json(&body).timeout(Duration::from_secs(30));
+            if let Some(key) = &cfg.api_key {
+                req = req.bearer_auth(key);
+            }
+            match req.send().await {
+                Ok(resp) => {
+                    let status = resp.status();
+                    if !status.is_success() {
+                        let body = redact_sensitive(&resp.text().await.unwrap_or_default(), cfg.api_key.as_deref());
+                        return CompleteOnceResult {
+                            ok: false,
+                            text: String::new(),
+                            message: format!("HTTP {status}: {}", truncate(&body, 200)),
+                        };
+                    }
+                    let v: serde_json::Value = match resp.json().await {
+                        Ok(v) => v,
+                        Err(e) => {
+                            return CompleteOnceResult {
+                                ok: false,
+                                text: String::new(),
+                                message: format!("invalid JSON: {e}"),
+                            }
+                        }
+                    };
+                    // Standard OpenAI shape: choices[0].message.content
+                    let text = v
+                        .get("choices")
+                        .and_then(|c| c.get(0))
+                        .and_then(|c| c.get("message"))
+                        .and_then(|m| m.get("content"))
+                        .and_then(|c| c.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    CompleteOnceResult {
+                        ok: true,
+                        text,
+                        message: String::new(),
+                    }
+                }
+                Err(e) => CompleteOnceResult {
+                    ok: false,
+                    text: String::new(),
+                    message: format!("请求失败：{e}"),
+                },
+            }
+        }
+        crate::ai::Provider::Anthropic => {
+            let url = join_api_url(&cfg.base_url, "/v1/messages");
+            // Anthropic separates system from the message list.
+            let (system, convo): (String, Vec<crate::ai::ChatMessage>) = {
+                let mut sys = String::new();
+                let mut conv = Vec::new();
+                for m in messages {
+                    if m.role == "system" {
+                        if !sys.is_empty() {
+                            sys.push_str("\n\n");
+                        }
+                        sys.push_str(&m.content);
+                    } else {
+                        conv.push(m);
+                    }
+                }
+                (sys, conv)
+            };
+            let body = serde_json::json!({
+                "model": cfg.model,
+                "max_tokens": max_tokens,
+                "system": system,
+                "messages": convo,
+                "stream": false,
+            });
+            let mut req = client
+                .post(&url)
+                .timeout(Duration::from_secs(30))
+                .header("anthropic-version", "2023-06-01")
+                .header("content-type", "application/json")
+                .json(&body);
+            if let Some(key) = &cfg.api_key {
+                req = req.header("x-api-key", key);
+            }
+            match req.send().await {
+                Ok(resp) => {
+                    let status = resp.status();
+                    if !status.is_success() {
+                        let body = redact_sensitive(&resp.text().await.unwrap_or_default(), cfg.api_key.as_deref());
+                        return CompleteOnceResult {
+                            ok: false,
+                            text: String::new(),
+                            message: format!("HTTP {status}: {}", truncate(&body, 200)),
+                        };
+                    }
+                    let v: serde_json::Value = match resp.json().await {
+                        Ok(v) => v,
+                        Err(e) => {
+                            return CompleteOnceResult {
+                                ok: false,
+                                text: String::new(),
+                                message: format!("invalid JSON: {e}"),
+                            }
+                        }
+                    };
+                    // Anthropic shape: content[0].text
+                    let text = v
+                        .get("content")
+                        .and_then(|c| c.as_array())
+                        .and_then(|a| a.first())
+                        .and_then(|b| b.get("text"))
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    CompleteOnceResult {
+                        ok: true,
+                        text,
+                        message: String::new(),
+                    }
+                }
+                Err(e) => CompleteOnceResult {
+                    ok: false,
+                    text: String::new(),
+                    message: format!("请求失败：{e}"),
+                },
+            }
+        }
+    }
+}
+
+/// Strip `<think>…</think>` reasoning blocks from a complete reply. Some
+/// reasoning models include the chain-of-thought inline in the content even
+/// in non-streaming mode. Handles completed, unclosed, and orphaned blocks.
+pub fn strip_think_blocks(text: &str) -> String {
+    let mut result = String::new();
+    let mut rest = text;
+
+    loop {
+        let Some(start) = rest.find("<think>") else {
+            result.push_str(rest);
+            break;
+        };
+        result.push_str(&rest[..start]);
+
+        let after_start = &rest[start + "<think>".len()..];
+        let Some(end) = after_start.find("</think>") else {
+            break;
+        };
+        rest = &after_start[end + "</think>".len()..];
+    }
+
+    loop {
+        let Some(end) = result.find("</think>") else {
+            break;
+        };
+        let after = end + "</think>".len();
+        result.replace_range(end..after, "");
+    }
+
+    result.trim().to_string()
 }

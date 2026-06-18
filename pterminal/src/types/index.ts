@@ -88,6 +88,14 @@ export interface TerminalSize {
   rows: number;
 }
 
+export interface LocalCompletion {
+  /** Full command line after applying the completion. */
+  text: string;
+  kind: string;
+  source: string;
+  score: number;
+}
+
 // Event payloads emitted from Rust.
 export interface TerminalDataPayload {
   id: string;

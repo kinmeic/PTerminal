@@ -26,6 +26,15 @@ export interface AiExplainInput {
   requestId: string;
 }
 
+export interface AiAutocompleteInput {
+  terminalId: string;
+  partialCmd: string;
+  /** Client-generated id; a later `cancel(requestId)` aborts this stream. */
+  requestId: string;
+  /** Snapshot of recent terminal output to include as context. */
+  terminalContext?: string;
+}
+
 /** Paginated AI messages: the loaded page plus the total matching count. */
 export interface AiMessagesResult {
   messages: AIMessage[];
@@ -53,7 +62,12 @@ export const aiService = {
     return invoke<void>('ai_explain', { input });
   },
 
-  /** Abort an in-flight stream by the id passed to chat/suggest/explain. */
+  /** Real-time shell command autocomplete (streamed, non-persistent). */
+  autocomplete(input: AiAutocompleteInput): Promise<void> {
+    return invoke<void>('ai_autocomplete', { input });
+  },
+
+  /** Abort an in-flight AI stream by the id passed to chat/suggest/explain/autocomplete. */
   cancel(requestId: string): Promise<void> {
     return invoke<void>('ai_cancel', { requestId });
   },

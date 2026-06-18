@@ -1,5 +1,6 @@
 import { Server } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
+import { dismissTerminalAutocomplete } from '@/services/autocompleteEvents';
 import type { SshShortcut } from '@/types';
 
 /**
@@ -61,7 +62,10 @@ function SshRow({ shortcut }: { shortcut: SshShortcut }) {
   return (
     <div
       className="ssh-item"
-      onClick={() => void openSshShortcut(shortcut)}
+      onClick={() => {
+        dismissTerminalAutocomplete();
+        void openSshShortcut(shortcut);
+      }}
       title={`Connect to ${hostLabel}`}
     >
       <span style={{ display: 'inline-flex', color: 'var(--color-accent)', flexShrink: 0 }}>

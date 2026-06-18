@@ -184,3 +184,46 @@ pub fn diagnose_messages(output: &str, cwd: &str) -> Vec<ChatMessage> {
         },
     ]
 }
+
+/// Shell command autocomplete. Given a partial command and context, return
+/// multiple likely FULL completions as a JSON array of strings.
+///
+/// Each item is the FULL completed command (e.g. "git status"), not just the
+/// suffix. The frontend displays the full text and computes the suffix to write
+/// when the user accepts (full minus what they already typed). This makes the
+/// popup readable ("status" instead of "tatus") and lets the frontend filter
+/// locally as the user keeps typing — avoiding redundant AI requests.
+pub fn autocomplete_messages(
+    partial_cmd: &str,
+    cwd: &str,
+    terminal_context: Option<&str>,
+) -> Vec<ChatMessage> {
+    let context_block = match terminal_context {
+        Some(c) if !c.trim().is_empty() => format!(
+            "\n\nRecent terminal output for context:\n\n```\n{c}\n```"
+        ),
+        _ => String::new(),
+    };
+    vec![
+        ChatMessage {
+            role: "system".to_string(),
+            content: format!(
+                "You are a shell command autocomplete assistant. \
+                 The user is working in directory: {cwd}. \
+                 The user has typed a partial command. Suggest up to 5 likely FULL completions. \
+                 \
+                 Each suggestion must be the FULL completed command including what the user \
+                 already typed. For example, if the user typed \"git s\", suggestions could be \
+                 [\"git status\", \"git stash\", \"git show\"]. \
+                 \
+                 Output a JSON array of full command strings, ordered by likelihood. \
+                 If the partial command is already complete or unrecognizable, output []. \
+                 No explanation, no markdown fences, just the JSON array.{context_block}"
+            ),
+        },
+        ChatMessage {
+            role: "user".to_string(),
+            content: format!("Partial command: {partial_cmd}"),
+        },
+    ]
+}

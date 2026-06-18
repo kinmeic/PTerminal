@@ -7,6 +7,7 @@ import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useAppStore } from '@/stores/appStore';
 import { terminalRegistry } from '@/services/terminalRegistry';
 import { terminalService } from '@/services/terminalService';
+import { dismissTerminalAutocomplete } from '@/services/autocompleteEvents';
 
 const SettingsPage = lazy(() =>
   import('@/components/settings/SettingsPage').then((mod) => ({
@@ -42,6 +43,9 @@ function App() {
   // (logical size is often unchanged), so we explicitly refresh each terminal
   // once layout has settled. Deferred via rAF so display has flipped first.
   useEffect(() => {
+    if (activeView === 'settings') {
+      dismissTerminalAutocomplete();
+    }
     if (prevView.current === 'settings' && activeView === 'terminal') {
       const raf = requestAnimationFrame(() => {
         for (const id of terminalRegistry.ids()) {

@@ -1,6 +1,12 @@
-import { Terminal } from '@xterm/xterm';
+import { Terminal, type IDisposable } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
+
+interface ImeFixState {
+  textarea: HTMLTextAreaElement;
+  inputHandler: (ev: Event) => void;
+  onDataDisposable: IDisposable;
+}
 
 interface TerminalEntry {
   term: Terminal;
@@ -12,6 +18,21 @@ interface TerminalEntry {
   writeRaf: number;
   /** Whether the onData → PTY writer binding has already been attached. */
   inputBound: boolean;
+  /** The PTY writer, set when bindInput is called. Used by the IME fix to
+   *  forward recovered characters directly to the shell. */
+  writer?: (data: string) => void;
+  /** Read-only input subscribers (e.g. autocomplete) that observe keystrokes
+   *  WITHOUT writing to the PTY. The PTY writer (bindInput) is the only path
+   *  that forwards data to the shell; subscribers just get a copy. */
+  inputListeners: Set<(data: string) => void>;
+  /** Pending rAF while waiting for xterm's textarea to become available. */
+  imeAttachRaf: number;
+  /** Resources owned by the IME insertText recovery hook. */
+  imeFix?: ImeFixState;
+  /** Recent raw PTY output tail, used before xterm's render buffer catches up. */
+  outputTail: string;
+  /** True while the active prompt is asking for hidden/sensitive input. */
+  sensitiveInputActive: boolean;
 }
 
 /**
@@ -45,11 +66,23 @@ class TerminalRegistry {
       allowProposedApi: true,
       theme: readThemeFromCss(),
     });
+
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.loadAddon(new WebLinksAddon());
 
-    entry = { term, fit, pending: [], writeQueue: '', writeRaf: 0, inputBound: false };
+    entry = {
+      term,
+      fit,
+      pending: [],
+      writeQueue: '',
+      writeRaf: 0,
+      inputBound: false,
+      inputListeners: new Set(),
+      imeAttachRaf: 0,
+      outputTail: '',
+      sensitiveInputActive: false,
+    };
     this.entries.set(id, entry);
     return term;
   }
@@ -58,12 +91,38 @@ class TerminalRegistry {
    * Wire the xterm `onData` (user keystrokes) to a writer callback exactly
    * once per instance. Repeated calls for the same id are no-ops, which keeps
    * re-mounts (e.g. React StrictMode) from duplicating input.
+   *
+   * The writer is the ONLY path that forwards data to the PTY. Any read-only
+   * observers registered via `onInput` receive a copy of the same data, but
+   * must never write to the shell themselves — otherwise every keystroke ends
+   * up in the PTY twice.
    */
   bindInput(id: string, writer: (data: string) => void): void {
     const entry = this.entries.get(id);
     if (!entry || entry.inputBound) return;
-    entry.term.onData(writer);
+    entry.writer = writer;
+    // Single fan-out: forward to the PTY writer AND every read-only subscriber.
+    entry.term.onData((data) => {
+      writer(data);
+      for (const fn of entry.inputListeners) fn(data);
+    });
     entry.inputBound = true;
+    // IME 修复依赖 writer + onData，在绑定后挂载（textarea 也需要已 open）。
+    this.fixImeInsertText(id);
+  }
+
+  /**
+   * Subscribe to keystroke data for a terminal WITHOUT writing to the PTY.
+   * Used by features like autocomplete that only need to observe the input
+   * stream. Returns an unsubscribe function.
+   */
+  onInput(id: string, listener: (data: string) => void): () => void {
+    const entry = this.entries.get(id);
+    if (!entry) return () => {};
+    entry.inputListeners.add(listener);
+    return () => {
+      entry.inputListeners.delete(listener);
+    };
   }
 
   /** Open the terminal into a DOM container and fit it; flush any buffered data. */
@@ -86,6 +145,7 @@ class TerminalRegistry {
   write(id: string, data: string): void {
     const entry = this.entries.get(id);
     if (!entry) return;
+    this.updateSensitiveInputState(entry, data);
     if (entry.term.element) {
       entry.writeQueue += data;
       if (!entry.writeRaf) {
@@ -149,6 +209,17 @@ class TerminalRegistry {
     return parts.join('\n');
   }
 
+  /** Whether the active prompt appears to be requesting sensitive hidden input. */
+  isSensitiveInputPrompt(id: string): boolean {
+    const entry = this.entries.get(id);
+    if (entry?.sensitiveInputActive) return true;
+
+    const tail = this.readTailLines(id, 4);
+    if (!tail) return false;
+    const lastLine = tail.split('\n').filter((line) => line.trim().length > 0).pop() ?? '';
+    return SENSITIVE_INPUT_PROMPT_RE.test(lastLine);
+  }
+
   /** Clear terminal output and reset scrollback. */
   clear(id: string): void {
     this.entries.get(id)?.term.clear();
@@ -198,12 +269,23 @@ class TerminalRegistry {
     const entry = this.entries.get(id);
     if (!entry) return;
     if (entry.writeRaf) cancelAnimationFrame(entry.writeRaf);
+    this.disposeImeFix(entry);
     entry.term.dispose();
     this.entries.delete(id);
   }
 
   has(id: string): boolean {
     return this.entries.has(id);
+  }
+
+  /**
+   * Get the underlying xterm.js Terminal for an id (or undefined). Used by
+   * features that need direct access to the terminal API (e.g. reading the
+   * cursor position for autocomplete overlays). Do NOT use this to write data —
+   * that must go through `bindInput`/the PTY writer.
+   */
+  getTerminal(id: string): Terminal | undefined {
+    return this.entries.get(id)?.term;
   }
 
   /** Re-apply the current CSS-variable-based theme to all live instances.
@@ -247,9 +329,125 @@ class TerminalRegistry {
     if (entry.term.element) entry.term.write(chunk);
     else entry.pending.push(chunk);
   }
+
+  private updateSensitiveInputState(entry: TerminalEntry, data: string): void {
+    entry.outputTail = stripAnsi(`${entry.outputTail}${data}`).slice(-2000);
+    const segments = entry.outputTail.split(/\r\n|\n|\r/);
+    const currentLine = segments[segments.length - 1] ?? '';
+
+    if (SENSITIVE_INPUT_PROMPT_RE.test(currentLine)) {
+      entry.sensitiveInputActive = true;
+      return;
+    }
+
+    if (entry.sensitiveInputActive && /[\r\n]/.test(data)) {
+      entry.sensitiveInputActive = false;
+    }
+  }
+
+  /**
+   * Attach the IME insertText recovery listener for a terminal. Called once
+   * after `bindInput`, but the textarea only exists after the terminal is
+   * opened and focused, so we retry via rAF until it appears.
+   *
+   * Recovers characters that macOS Pinyin produces via `input(insertText)` for
+   * Shift+symbol punctuation (？ “ —— …) but that xterm's internal `_inputEvent`
+   * drops due to its `(!composed || !keyDownSeen)` guard when the input event
+   * arrives before the matching keydown. See module-level comment for details.
+   */
+  private fixImeInsertText(id: string): void {
+    const entry = this.entries.get(id);
+    if (!entry) return;
+    if (entry.imeAttachRaf) {
+      cancelAnimationFrame(entry.imeAttachRaf);
+      entry.imeAttachRaf = 0;
+    }
+    const tryAttach = (attempts = 0) => {
+      entry.imeAttachRaf = 0;
+      const ta = entry.term.textarea;
+      if (ta) {
+        this.installImeFix(entry, ta);
+        return;
+      }
+      if (attempts < 60) {
+        entry.imeAttachRaf = requestAnimationFrame(() => tryAttach(attempts + 1));
+      }
+    };
+    tryAttach();
+  }
+
+  /** The actual recovery listener, attached to one textarea. Idempotent. */
+  private installImeFix(entry: TerminalEntry, ta: HTMLTextAreaElement): void {
+    if (entry.imeFix?.textarea === ta) return;
+    this.disposeImeFix(entry);
+
+    const imeTextarea = ta as HTMLTextAreaElement & { _ptImeFixed?: boolean };
+    if (imeTextarea._ptImeFixed) return;
+    imeTextarea._ptImeFixed = true;
+
+    // Record every string xterm emits on onData. We compare this against the
+    // IME's input(insertText) data to decide whether xterm already forwarded it
+    // (→ leave alone) or swallowed it (→ recover, forwarding it ourselves).
+    let onDataHits: string[] = [];
+    const onDataDisposable = entry.term.onData((data) => {
+      onDataHits.push(data);
+    });
+
+    const inputHandler = (ev: Event) => {
+      const inputEvent = ev as InputEvent;
+      // Only the IME "direct insert" path interests us; ordinary typing and
+      // full composition events are already handled correctly by xterm.
+      if (inputEvent.inputType !== 'insertText' || !inputEvent.data) return;
+      const text: string = inputEvent.data;
+      // Snapshot the hits collected so far and reset, then on the next
+      // microtask check whether xterm emitted this exact text on onData.
+      // (onData fires synchronously from _inputEvent, which runs before the
+      //  microtask queue drains, so a microtask delay is enough to observe it.)
+      const before = onDataHits;
+      onDataHits = [];
+      queueMicrotask(() => {
+        if (before.includes(text)) return; // xterm delivered it — don't double-send.
+        // xterm swallowed it: forward to the PTY writer + read-only subscribers,
+        // mirroring the bindInput fan-out so autocomplete still sees it.
+        entry.writer?.(text);
+        for (const fn of entry.inputListeners) fn(text);
+        // Clear the textarea's residual value so it can't be re-read or echoed.
+        // xterm maintains its own buffer; this element is only an IME surface.
+        if (ta.value) ta.value = '';
+      });
+    };
+
+    ta.addEventListener(
+      'input',
+      inputHandler,
+      true // capture phase, before xterm's own listeners (defensive).
+    );
+    entry.imeFix = { textarea: ta, inputHandler, onDataDisposable };
+  }
+
+  private disposeImeFix(entry: TerminalEntry): void {
+    if (entry.imeAttachRaf) {
+      cancelAnimationFrame(entry.imeAttachRaf);
+      entry.imeAttachRaf = 0;
+    }
+    if (!entry.imeFix) return;
+
+    const { textarea, inputHandler, onDataDisposable } = entry.imeFix;
+    textarea.removeEventListener('input', inputHandler, true);
+    onDataDisposable.dispose();
+    delete (textarea as HTMLTextAreaElement & { _ptImeFixed?: boolean })._ptImeFixed;
+    entry.imeFix = undefined;
+  }
 }
 
 export const terminalRegistry = new TerminalRegistry();
+
+const SENSITIVE_INPUT_PROMPT_RE =
+  /\b(password|passphrase|passwd|verification code|one[-\s]?time|otp|2fa|two[-\s]?factor|token|secret|pin)\b.*[:：]\s*$|(?:密码|口令|验证码|动态码|令牌|密钥|私钥).*[:：]\s*$/i;
+
+function stripAnsi(text: string): string {
+  return text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+}
 
 /** Read the active theme colors from CSS variables so the xterm instance
  *  matches the current dark/light theme and column backgrounds. */
@@ -273,3 +471,9 @@ function readThemeFromCss(): import('@xterm/xterm').ITheme {
     white: css('--color-terminal-white') || '#b1bac4',
   };
 }
+
+// macOS 系统拼音 IME 丢字符修复的实现见 TerminalRegistry.installImeFix（class 内）。
+// 注释说明保留在这里：现象是 Shift+符号（? “ ——）大部分时间需按 2 次；根因是
+// xterm 的 _inputEvent 守卫在 input(insertText, composed=true) 先于 keydown 到达
+// 时把字符判定为重复而丢弃，onData 不触发。修复用 microtask 检查 onData 是否跟随，
+// 没跟随时补发字符到 PTY，已投递则不动——保证不双发。

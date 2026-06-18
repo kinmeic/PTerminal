@@ -10,6 +10,7 @@ import {
 import { sshService, type CreateSshShortcutInput, type UpdateSshShortcutInput } from '@/services/sshService';
 import { aiService } from '@/services/aiService';
 import { settingsService, SETTING_KEYS } from '@/services/settingsService';
+import { dismissTerminalAutocomplete } from '@/services/autocompleteEvents';
 import { toast } from '@/stores/toastStore';
 
 /** Terminal font defaults (used when no saved preference exists). */
@@ -125,8 +126,16 @@ interface AppState {
   fontFamily: string;
   fontSize: number;
   lineHeight: number;
+  /** Whether terminal autocomplete UI is enabled at all. */
+  terminalAutocompleteEnabled: boolean;
+  /** Whether AI enhancement for autocomplete is enabled. */
+  autocompleteEnabled: boolean;
   /** Load saved font family/size from the settings table. */
   loadAppearance: () => Promise<void>;
+  /** Persist terminal autocomplete enabled/disabled preference. */
+  setTerminalAutocompleteEnabled: (enabled: boolean) => Promise<void>;
+  /** Persist AI autocomplete enhancement enabled/disabled preference. */
+  setAutocompleteEnabled: (enabled: boolean) => Promise<void>;
   /** Persist and apply a new font family to all live terminals. */
   setTerminalFontFamily: (family: string) => Promise<void>;
   /** Adjust the ACTIVE terminal's font size by a delta (clamped), persist per-terminal. */
@@ -176,8 +185,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   fontFamily: DEFAULT_FONT_FAMILY,
   fontSize: DEFAULT_FONT_SIZE,
   lineHeight: DEFAULT_LINE_HEIGHT,
+  terminalAutocompleteEnabled: false,
+  autocompleteEnabled: false,
 
   setActiveTerminal: (id) => {
+    dismissTerminalAutocomplete();
     const requestId = id ? get().aiStreams[id] ?? null : null;
     set({
       activeTerminalId: id,
@@ -223,6 +235,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   createTerminal: async (opts) => {
+    dismissTerminalAutocomplete();
     try {
       const terminal = await terminalService.spawn({
         name: opts?.name,
@@ -400,6 +413,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   openSshShortcut: async (shortcut) => {
+    dismissTerminalAutocomplete();
     try {
       const parts: string[] = [];
       // When a password is saved, wrap ssh with sshpass so login is automatic.
@@ -646,15 +660,20 @@ export const useAppStore = create<AppState>((set, get) => ({
   // --- Terminal appearance ---
   loadAppearance: async () => {
     try {
-      const [family, size, lineHeight] = await Promise.all([
+      const [family, size, lineHeight, terminalAcEnabled, aiAcEnabled] = await Promise.all([
         settingsService.get(SETTING_KEYS.fontFamily),
         settingsService.get(SETTING_KEYS.fontSize),
         settingsService.get(SETTING_KEYS.lineHeight),
+        settingsService.get(SETTING_KEYS.terminalAutocompleteEnabled),
+        settingsService.get(SETTING_KEYS.autocompleteEnabled),
       ]);
       const next = {
         fontFamily: family || DEFAULT_FONT_FAMILY,
         fontSize: size ? Number(size) || DEFAULT_FONT_SIZE : DEFAULT_FONT_SIZE,
         lineHeight: lineHeight ? Number(lineHeight) || DEFAULT_LINE_HEIGHT : DEFAULT_LINE_HEIGHT,
+        // Default to disabled when the key is absent (first launch).
+        terminalAutocompleteEnabled: terminalAcEnabled === null ? false : terminalAcEnabled === '1',
+        autocompleteEnabled: aiAcEnabled === null ? false : aiAcEnabled === '1',
       };
       set(next);
       // Font family is global; font size is per-terminal. Apply the family to
@@ -665,6 +684,28 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     } catch (err) {
       console.error('Failed to load appearance:', err);
+    }
+  },
+
+  setTerminalAutocompleteEnabled: async (enabled) => {
+    const previous = get().terminalAutocompleteEnabled;
+    set({ terminalAutocompleteEnabled: enabled });
+    try {
+      await settingsService.set(SETTING_KEYS.terminalAutocompleteEnabled, enabled ? '1' : '0');
+    } catch (err) {
+      set({ terminalAutocompleteEnabled: previous });
+      console.error('Failed to save terminal autocomplete enabled:', err);
+    }
+  },
+
+  setAutocompleteEnabled: async (enabled) => {
+    const previous = get().autocompleteEnabled;
+    set({ autocompleteEnabled: enabled });
+    try {
+      await settingsService.set(SETTING_KEYS.autocompleteEnabled, enabled ? '1' : '0');
+    } catch (err) {
+      set({ autocompleteEnabled: previous });
+      console.error('Failed to save autocomplete enabled:', err);
     }
   },
 
