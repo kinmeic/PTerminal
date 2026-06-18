@@ -85,6 +85,20 @@ pub fn run() {
             commands::settings::settings_set,
             commands::settings::proxy_reload,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // 点击 Dock 图标时恢复隐藏的窗口（需求 1 的配套）。
+            // macOS 的 applicationShouldHandleReopen 在所有窗口都隐藏时 has_visible_windows=false，
+            // 此时手动 show + unminimize 主窗口，让红灯隐藏后的窗口能被重新唤出。
+            if let tauri::RunEvent::Reopen { has_visible_windows, .. } = event {
+                if !has_visible_windows {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.unminimize();
+                        let _ = window.set_focus();
+                    }
+                }
+            }
+        });
 }
