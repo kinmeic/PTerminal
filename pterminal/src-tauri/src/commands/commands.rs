@@ -88,7 +88,10 @@ pub fn command_pin(
     fetch_command(&state, &input.id)
 }
 
-/// List commands for a terminal, including global commands (terminal_id NULL).
+/// List commands for a single terminal (terminal-specific rows only). Global
+/// custom completions (terminal_id NULL) are excluded here so they don't
+/// clutter the right panel — they come back via `command_list_global` and are
+/// surfaced through autocomplete.
 /// Pinned commands appear first, ordered by pin_order; then by created_at.
 #[tauri::command]
 pub fn command_list(
@@ -100,7 +103,7 @@ pub fn command_list(
         .prepare(
             "SELECT id, terminal_id, label, command, is_pinned, pin_order, created_at, updated_at
              FROM commands
-             WHERE terminal_id IS NULL OR terminal_id = ?1
+             WHERE terminal_id = ?1
              ORDER BY is_pinned DESC, pin_order ASC, created_at ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -126,6 +129,39 @@ pub fn command_list(
 }
 
 // ---- helpers ---------------------------------------------------------------
+
+/// List global custom completions (terminal_id NULL). These are user-curated,
+/// always-available completions merged into terminal autocomplete.
+/// Pinned first, then by created_at.
+#[tauri::command]
+pub fn command_list_global(state: State<'_, AppState>) -> Result<Vec<CommandDto>, String> {
+    let conn: DbConn = state.db.get().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, terminal_id, label, command, is_pinned, pin_order, created_at, updated_at
+             FROM commands
+             WHERE terminal_id IS NULL
+             ORDER BY is_pinned DESC, pin_order ASC, created_at ASC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt.query_map([], |row| {
+        Ok(CommandDto {
+            id: row.get(0)?,
+            terminal_id: row.get(1)?,
+            label: row.get(2)?,
+            command: row.get(3)?,
+            is_pinned: row.get::<_, i64>(4)? != 0,
+            pin_order: row.get(5)?,
+            created_at: row.get(6)?,
+            updated_at: row.get(7)?,
+        })
+    }).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| e.to_string())?);
+    }
+    Ok(out)
+}
 
 fn fetch_command(state: &AppState, id: &str) -> Result<CommandDto, String> {
     let conn: DbConn = state.db.get().map_err(|e| e.to_string())?;

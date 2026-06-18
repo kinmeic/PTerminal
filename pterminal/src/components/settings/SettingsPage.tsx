@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, ChevronDown, Plus, Pencil, Trash2, Server, X, Check, Settings, Bot, type LucideIcon } from 'lucide-react';
+import { ArrowLeft, ChevronDown, Plus, Pencil, Trash2, Server, X, Check, Settings, Bot, Wand2, type LucideIcon } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { aiService } from '@/services/aiService';
 import { SettingsTopBar } from '@/components/layout/TopBar';
 import { loadProxyConfig, saveProxyConfig, type ProxyConfig } from '@/services/proxyService';
-import type { AIConfig, AISettings, SshShortcut } from '@/types';
+import type { AIConfig, AISettings, Command, SshShortcut } from '@/types';
 
-type Section = 'general' | 'model' | 'ssh';
+type Section = 'general' | 'model' | 'ssh' | 'completion';
 
 interface SettingsPageProps {
   onBack: () => void;
@@ -53,6 +53,12 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
               active={section === 'ssh'}
               onClick={() => setSection('ssh')}
             />
+            <MenuItem
+              label="自定义补全"
+              icon={Wand2}
+              active={section === 'completion'}
+              onClick={() => setSection('completion')}
+            />
           </div>
         </div>
 
@@ -64,6 +70,7 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
           {section === 'general' && <GeneralSettings />}
           {section === 'model' && <ModelSettings />}
           {section === 'ssh' && <SshSettings />}
+          {section === 'completion' && <CompletionSettings />}
         </div>
       </div>
     </div>
@@ -1018,6 +1025,274 @@ function SshFormView({
           className="btn btn-primary"
           disabled={!form.name.trim() || !form.host.trim() || !form.user.trim()}
         >
+          <Check size={14} strokeWidth={1.75} />
+          {editingId ? '保存' : '添加'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// ---- Custom completions management -----------------------------------------
+
+const emptyCompletionForm = { label: '', command: '' };
+type CompletionForm = typeof emptyCompletionForm;
+
+function CompletionSettings() {
+  const completions = useAppStore((s) => s.customCompletions);
+  const addCompletion = useAppStore((s) => s.addCustomCompletion);
+  const editCompletion = useAppStore((s) => s.editCustomCompletion);
+  const removeCompletion = useAppStore((s) => s.removeCustomCompletion);
+
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState<CompletionForm>(emptyCompletionForm);
+
+  const resetForm = () => {
+    setForm(emptyCompletionForm);
+    setEditingId(null);
+    setShowForm(false);
+  };
+
+  const startEdit = (c: Command) => {
+    setForm({ label: c.label, command: c.command });
+    setEditingId(c.id);
+    setShowForm(true);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.command.trim()) return;
+    const payload = { label: form.label.trim(), command: form.command.trim() };
+    if (editingId) {
+      await editCompletion(editingId, payload);
+    } else {
+      await addCompletion(payload);
+    }
+    resetForm();
+  };
+
+  if (showForm) {
+    return (
+      <div style={{ width: '100%', maxWidth: 560, padding: '32px 40px' }}>
+        <button
+          className="collapse-button"
+          onClick={resetForm}
+          title="返回列表"
+          style={{ marginBottom: 16 }}
+        >
+          <ArrowLeft size={16} strokeWidth={1.75} />
+        </button>
+        <h1
+          style={{
+            fontSize: 20,
+            fontWeight: 600,
+            marginBottom: 6,
+            color: 'var(--color-text-primary)',
+          }}
+        >
+          {editingId ? '编辑自定义补全' : '新建自定义补全'}
+        </h1>
+        <p style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 24 }}>
+          填写带完整参数的命令，保存后会在终端补全中融入并自动去重。
+        </p>
+        <CompletionFormView
+          form={form}
+          setForm={setForm}
+          editingId={editingId}
+          onSubmit={handleSubmit}
+          onCancel={resetForm}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ width: '100%', maxWidth: 640, padding: '32px 40px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <h1
+          style={{
+            fontSize: 20,
+            fontWeight: 600,
+            color: 'var(--color-text-primary)',
+          }}
+        >
+          自定义补全
+        </h1>
+        <button
+          className="btn btn-primary"
+          onClick={() => {
+            setForm(emptyCompletionForm);
+            setEditingId(null);
+            setShowForm(true);
+          }}
+          style={{ fontSize: 12, padding: '5px 12px' }}
+        >
+          <Plus size={14} strokeWidth={1.75} />
+          新建
+        </button>
+      </div>
+      <p style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 24 }}>
+        管理带完整参数的自定义命令。
+      </p>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {completions.length === 0 ? (
+          <div
+            style={{
+              padding: '32px 16px',
+              textAlign: 'center',
+              color: 'var(--color-text-muted)',
+              fontSize: 13,
+              border: '1px dashed var(--color-border)',
+              borderRadius: 8,
+            }}
+          >
+            暂无自定义补全，点击「新建」添加。
+          </div>
+        ) : (
+          completions.map((c) => (
+            <CompletionRow
+              key={c.id}
+              completion={c}
+              onEdit={() => startEdit(c)}
+              onDelete={() => void removeCompletion(c.id)}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CompletionRow({
+  completion,
+  onEdit,
+  onDelete,
+}: {
+  completion: Command;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        padding: '10px 12px',
+        borderRadius: 8,
+        border: '1px solid var(--color-border)',
+        backgroundColor: 'var(--color-bg-secondary)',
+      }}
+    >
+      <span style={{ display: 'inline-flex', color: 'var(--color-accent)' }}>
+        <Wand2 size={16} strokeWidth={1.75} />
+      </span>
+      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+        <span style={{ fontSize: 13, color: 'var(--color-text-primary)' }}>{completion.label}</span>
+        <span
+          style={{
+            fontSize: 11,
+            fontFamily: 'var(--font-mono)',
+            color: 'var(--color-text-muted)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          title={completion.command}
+        >
+          {completion.command}
+        </span>
+      </div>
+      <button className="btn-icon" title="编辑" onClick={onEdit} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Pencil size={14} strokeWidth={1.75} />
+      </button>
+      <button className="btn-icon" title="删除" onClick={onDelete} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-danger)' }}>
+        <Trash2 size={14} strokeWidth={1.75} />
+      </button>
+    </div>
+  );
+}
+
+function CompletionFormView({
+  form,
+  setForm,
+  editingId,
+  onSubmit,
+  onCancel,
+}: {
+  form: CompletionForm;
+  setForm: React.Dispatch<React.SetStateAction<CompletionForm>>;
+  editingId: string | null;
+  onSubmit: (e: React.FormEvent) => void;
+  onCancel: () => void;
+}) {
+  const labelStyle: React.CSSProperties = {
+    fontSize: 12,
+    fontWeight: 500,
+    color: 'var(--color-text-secondary)',
+    marginBottom: 6,
+    display: 'block',
+  };
+  const hintStyle: React.CSSProperties = {
+    fontSize: 11,
+    color: 'var(--color-text-muted)',
+    marginTop: 4,
+  };
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    padding: '8px 10px',
+    borderRadius: 6,
+    border: '1px solid var(--color-border)',
+    backgroundColor: 'var(--color-bg-primary)',
+    color: 'var(--color-text-primary)',
+    fontSize: 13,
+    outline: 'none',
+  };
+
+  return (
+    <form
+      onSubmit={onSubmit}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 16,
+      }}
+    >
+      <div>
+        <label style={labelStyle}>命令（含完整参数）</label>
+        <input
+          type="text"
+          value={form.command}
+          onChange={(e) => setForm((f) => ({ ...f, command: e.target.value }))}
+          placeholder="git push --force-with-lease"
+          style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }}
+          autoFocus
+        />
+        <div style={hintStyle}>
+          输入命令前缀时会作为补全候选，并与其他来源自动去重。
+        </div>
+      </div>
+
+      <div>
+        <label style={labelStyle}>备注（可选）</label>
+        <input
+          type="text"
+          value={form.label}
+          onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
+          placeholder="留空则使用命令本身"
+          style={inputStyle}
+        />
+        <div style={hintStyle}>仅用于列表中显示，便于识别。</div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-start' }}>
+        <button type="button" className="btn btn-secondary" onClick={onCancel}>
+          <X size={14} strokeWidth={1.75} />
+          取消
+        </button>
+        <button type="submit" className="btn btn-primary" disabled={!form.command.trim()}>
           <Check size={14} strokeWidth={1.75} />
           {editingId ? '保存' : '添加'}
         </button>

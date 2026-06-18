@@ -504,11 +504,12 @@ export function useTerminalAutocomplete(terminalId: string) {
       const immediate = mergeSuggestionLists(
         buffer,
         remoteContext ? [] : stateRef.current.suggestions,
+        customCompletionSuggestions(buffer),
         commandHistorySuggestions(
           buffer,
           remoteSessionRef.current ? remoteCommandHistoryRef.current : commandHistoryRef.current
         ),
-        remoteContext ? remoteCommandSuggestions(buffer) : commonCommandSuggestions(buffer),
+        remoteContext ? remoteCommandSuggestions(buffer) : [],
         remoteContext ? [] : cachedAiSuggestionsRef.current
       );
       const immediateCount = showSuggestions(buffer, immediate);
@@ -610,10 +611,15 @@ export function useTerminalAutocomplete(terminalId: string) {
   };
 }
 
-function commonCommandSuggestions(buffer: string): string[] {
+/**
+ * Global user-curated completions (Settings → 自定义补全管理). Applied in both
+ * local and remote sessions since the user explicitly defined them; dedup vs
+ * other sources happens in `mergeSuggestionLists`.
+ */
+function customCompletionSuggestions(buffer: string): string[] {
   return useAppStore
     .getState()
-    .commonCommands
+    .customCompletions
     .map((command) => command.command.trimEnd())
     .filter((command) => isPrefixCompletion(buffer, command) && command.length > buffer.length);
 }

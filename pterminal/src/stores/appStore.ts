@@ -77,6 +77,13 @@ interface AppState {
   removeCommand: (id: string) => Promise<void>;
   togglePinCommand: (command: Command) => Promise<void>;
 
+  // --- Custom completions (global, terminal_id NULL) ---
+  customCompletions: Command[];
+  loadCustomCompletions: () => Promise<void>;
+  addCustomCompletion: (input: { label?: string; command: string }) => Promise<void>;
+  editCustomCompletion: (id: string, updates: { label?: string; command?: string }) => Promise<void>;
+  removeCustomCompletion: (id: string) => Promise<void>;
+
   // --- Commands to the live terminal ---
   sendCommand: (terminalId: string, command: string) => Promise<void>;
 
@@ -167,6 +174,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   terminals: [],
   activeTerminalId: null,
   commonCommands: [],
+  customCompletions: [],
   aiMessages: [],
   aiMessagesTotal: 0,
   sshShortcuts: [],
@@ -370,6 +378,50 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   sendCommand: async (terminalId, command) => {
     await terminalService.write(terminalId, command + '\r');
+  },
+
+  loadCustomCompletions: async () => {
+    try {
+      const customCompletions = await commandService.listGlobal();
+      set({ customCompletions });
+    } catch (err) {
+      console.error('Failed to load custom completions:', err);
+    }
+  },
+
+  addCustomCompletion: async (input) => {
+    try {
+      const created = await commandService.create({
+        terminalId: undefined,
+        label: input.label?.trim() || input.command.trim(),
+        command: input.command.trim(),
+      });
+      set((state) => ({ customCompletions: [...state.customCompletions, created] }));
+    } catch (err) {
+      toast.error('Failed to add custom completion'); console.error(err);
+    }
+  },
+
+  editCustomCompletion: async (id, updates) => {
+    try {
+      const updated = await commandService.update({ id, ...updates });
+      set((state) => ({
+        customCompletions: state.customCompletions.map((c) => (c.id === id ? updated : c)),
+      }));
+    } catch (err) {
+      toast.error('Failed to update custom completion'); console.error(err);
+    }
+  },
+
+  removeCustomCompletion: async (id) => {
+    try {
+      await commandService.remove(id);
+      set((state) => ({
+        customCompletions: state.customCompletions.filter((c) => c.id !== id),
+      }));
+    } catch (err) {
+      toast.error('Failed to delete custom completion'); console.error(err);
+    }
   },
 
   loadSshShortcuts: async () => {

@@ -58,6 +58,7 @@ pub fn run() {
             commands::commands::command_delete,
             commands::commands::command_pin,
             commands::commands::command_list,
+            commands::commands::command_list_global,
             commands::ssh::ssh_create,
             commands::ssh::ssh_update,
             commands::ssh::ssh_delete,

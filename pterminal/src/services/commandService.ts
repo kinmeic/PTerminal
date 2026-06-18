@@ -36,4 +36,8 @@ export const commandService = {
   list(terminalId: string): Promise<Command[]> {
     return invoke<Command[]>('command_list', { terminalId });
   },
+  /** Global custom completions (terminal_id NULL) — merged into autocomplete. */
+  listGlobal(): Promise<Command[]> {
+    return invoke<Command[]>('command_list_global');
+  },
 };
