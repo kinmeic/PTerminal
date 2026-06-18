@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.12"
+version = "0.1.13"
 description = "PTerminal - macOS native AI terminal"
 authors = ["you"]
 license = ""
