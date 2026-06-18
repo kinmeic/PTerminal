@@ -23,7 +23,6 @@
   --color-sidebar-left: #3C3C3C;
   --color-sidebar-center: #161616;
   --color-sidebar-right: #161616;
-  
   /* Terminal colors */
   --color-terminal-bg: #161616;
   --color-terminal-fg: #c9d1d9;
@@ -96,6 +95,12 @@ html, body, #root {
   border-bottom: 1px solid var(--color-border);
   user-select: none;
   cursor: default;
+}
+
+/* In native fullscreen the macOS traffic lights disappear (需求 2), so drop
+   the left gutter — title and trailing buttons slide left to reclaim it. */
+.topbar[data-fullscreen="true"] {
+  padding-left: 10px;
 }
 
 .topbar-title {

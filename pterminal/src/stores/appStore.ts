@@ -52,6 +52,12 @@ interface AppState {
   isLeftPanelVisible: boolean;
   /** Whether the left panel overlay is showing (hover preview when collapsed). */
   isLeftPanelHovering: boolean;
+  /** Whether the main window is currently in native macOS fullscreen.
+   *  Updated from the `tauri://resize` listener in App.tsx; the top bar uses
+   *  it to drop the traffic-light gutter in fullscreen (需求 2). */
+  isFullscreen: boolean;
+  /** Apply the current fullscreen state (drives top-bar layout). */
+  setFullscreen: (v: boolean) => void;
 
   // Top-level view switch
   activeView: 'terminal' | 'settings';
@@ -212,6 +218,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   isRightPanelVisible: false,
   isLeftPanelVisible: true,
   isLeftPanelHovering: false,
+  isFullscreen: false,
   activeView: 'terminal',
   fontFamily: DEFAULT_FONT_FAMILY,
   fontSize: DEFAULT_FONT_SIZE,
@@ -680,6 +687,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       void settingsService.set(SETTING_KEYS.isDarkMode, newMode ? '1' : '0').catch(() => {});
       return { isDarkMode: newMode };
     }),
+
+  setFullscreen: (v) => set({ isFullscreen: v }),
 
   toggleRightPanel: () =>
     set((state) => {

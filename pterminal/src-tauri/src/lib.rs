@@ -41,6 +41,14 @@ pub fn run() {
 
             Ok(())
         })
+        // 红绿灯关闭按钮 → 隐藏到 Dock，保持进程运行（需求 1）。Tauri 默认在
+        // 最后一个窗口关闭时退出；这里阻止关闭改为隐藏，点击 Dock 图标即可恢复。
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             commands::terminal::terminal_spawn,
             commands::terminal::terminal_write,

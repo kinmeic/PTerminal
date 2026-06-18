@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useRef } from 'react';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Toaster } from '@/components/Toaster';
 import { useTauriEvents } from '@/hooks/useTauriEvents';
@@ -28,6 +29,7 @@ function App() {
   const loadCustomCompletions = useAppStore((s) => s.loadCustomCompletions);
   const loadAppearance = useAppStore((s) => s.loadAppearance);
   const loadUiState = useAppStore((s) => s.loadUiState);
+  const setFullscreen = useAppStore((s) => s.setFullscreen);
   const activeView = useAppStore((s) => s.activeView);
   const setActiveView = useAppStore((s) => s.setActiveView);
   const prevView = useRef(activeView);
@@ -39,6 +41,28 @@ function App() {
     void loadAppearance();
     void loadUiState();
   }, [loadTerminals, loadSshShortcuts, loadCustomCompletions, loadAppearance, loadUiState]);
+
+  // Track native fullscreen state (需求 2). Tauri 2 has no dedicated
+  // fullscreen event, but `tauri://resize` (fired by `onResized`) is the
+  // reliable signal for entering/exiting macOS fullscreen — re-query
+  // `isFullscreen()` on each resize and mirror it into the store.
+  useEffect(() => {
+    let unlistenFn: (() => void) | null = null;
+    const win = getCurrentWindow();
+    const sync = () => {
+      win
+        .isFullscreen()
+        .then((f) => setFullscreen(f))
+        .catch(() => {});
+    };
+    sync(); // sync initial state
+    win.onResized(sync).then((un) => {
+      unlistenFn = un;
+    });
+    return () => {
+      unlistenFn?.();
+    };
+  }, [setFullscreen]);
 
   // When returning from settings to the terminal view, every xterm canvas was
   // frozen while its ancestor had display:none. fit() alone won't repaint it

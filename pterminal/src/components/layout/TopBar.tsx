@@ -25,6 +25,7 @@ interface TopBarProps {
  * so they still receive clicks.
  */
 export function TopBar({ leftSlot, title, subtitle, rightSlot }: TopBarProps) {
+  const isFullscreen = useAppStore((s) => s.isFullscreen);
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.button !== 0) return; // only left button initiates a drag
     const target = e.target as HTMLElement | null;
@@ -34,7 +35,12 @@ export function TopBar({ leftSlot, title, subtitle, rightSlot }: TopBarProps) {
   };
 
   return (
-    <div className="topbar" data-tauri-drag-region onMouseDown={handleMouseDown}>
+    <div
+      className="topbar"
+      data-fullscreen={isFullscreen ? 'true' : 'false'}
+      data-tauri-drag-region
+      onMouseDown={handleMouseDown}
+    >
       {/* Left: traffic-light gap + optional left drawer toggle + title */}
       <div
         data-tauri-drag-region
