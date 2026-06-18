@@ -69,6 +69,9 @@ pub struct AppState {
     /// completion. Standard Mutex (not RwLock): insert/remove/cancel are all
     /// short write ops, and a stream never reads another stream's token.
     pub cancels: Arc<Mutex<HashMap<String, CancellationToken>>>,
+    /// PATH entries resolved from the user's login shell. GUI apps often start
+    /// with a thin launchd PATH that misses nvm/pyenv/homebrew additions.
+    pub shell_path_cache: Arc<Mutex<Option<Vec<PathBuf>>>>,
 }
 
 impl AppState {
@@ -79,6 +82,7 @@ impl AppState {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             http: Arc::new(RwLock::new(client::build_client(&proxy))),
             cancels: Arc::new(Mutex::new(HashMap::new())),
+            shell_path_cache: Arc::new(Mutex::new(None)),
         }
     }
 

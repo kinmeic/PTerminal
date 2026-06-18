@@ -11,6 +11,7 @@ use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -490,9 +491,10 @@ pub fn terminal_local_completions(
         .unwrap_or(LOCAL_COMPLETION_LIMIT);
 
     let mut out: Vec<LocalCompletionDto> = Vec::new();
+    let command_paths = completion_path_dirs(&state);
 
     if parsed.is_command_position {
-        collect_command_name_completions(&parsed, limit, &mut out);
+        collect_command_name_completions(&parsed, limit, &command_paths, &mut out);
         collect_path_completions(&parsed, &cwd, true, limit, &mut out);
     } else {
         collect_git_completions(&parsed, limit, &mut out);
@@ -743,6 +745,49 @@ fn terminal_cwd(state: &AppState, terminal_id: &str) -> String {
         .unwrap_or_else(|| std::env::var("HOME").unwrap_or_else(|_| "/".to_string()))
 }
 
+fn completion_path_dirs(state: &AppState) -> Vec<PathBuf> {
+    if let Ok(cache) = state.shell_path_cache.lock() {
+        if let Some(paths) = cache.as_ref() {
+            return paths.clone();
+        }
+    }
+
+    let paths = resolve_login_shell_path().unwrap_or_else(env_path_dirs);
+    match state.shell_path_cache.lock() {
+        Ok(mut cache) => *cache = Some(paths.clone()),
+        Err(poisoned) => {
+            log::error!("shell PATH cache lock poisoned — recovering");
+            *poisoned.into_inner() = Some(paths.clone());
+        }
+    }
+    paths
+}
+
+fn resolve_login_shell_path() -> Option<Vec<PathBuf>> {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let output = Command::new(shell)
+        .arg("-lic")
+        .arg("printf '%s' \"$PATH\"")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let path = String::from_utf8(output.stdout).ok()?;
+    let dirs: Vec<PathBuf> = std::env::split_paths(path.trim()).collect();
+    if dirs.is_empty() {
+        None
+    } else {
+        Some(dirs)
+    }
+}
+
+fn env_path_dirs() -> Vec<PathBuf> {
+    std::env::var_os("PATH")
+        .map(|paths| std::env::split_paths(&paths).collect())
+        .unwrap_or_default()
+}
+
 #[derive(Debug)]
 struct ParsedInput<'a> {
     original: &'a str,
@@ -827,6 +872,7 @@ fn current_token_start(s: &str) -> usize {
 fn collect_command_name_completions(
     parsed: &ParsedInput<'_>,
     limit: usize,
+    path_dirs: &[PathBuf],
     out: &mut Vec<LocalCompletionDto>,
 ) {
     let prefix = parsed.current_token;
@@ -846,24 +892,22 @@ fn collect_command_name_completions(
         }
     }
 
-    if let Some(paths) = std::env::var_os("PATH") {
-        for dir in std::env::split_paths(&paths) {
-            let Ok(entries) = std::fs::read_dir(dir) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                if out.len() >= limit * 4 {
-                    return;
-                }
-                let name = entry.file_name().to_string_lossy().to_string();
-                if !name.starts_with(prefix) {
-                    continue;
-                }
-                if !is_executable_file(&entry.path()) {
-                    continue;
-                }
-                push_completion(out, parsed.replace_current_token(&name), "command", "path", 84);
+    for dir in path_dirs {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if out.len() >= limit * 4 {
+                return;
             }
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !name.starts_with(prefix) {
+                continue;
+            }
+            if !is_executable_file(&entry.path()) {
+                continue;
+            }
+            push_completion(out, parsed.replace_current_token(&name), "command", "path", 84);
         }
     }
 }
