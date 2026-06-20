@@ -177,6 +177,44 @@ html, body, #root {
   color: var(--color-text-primary);
 }
 
+/* Terminal autocomplete quick toggle (icon + ON/OFF). Sits left of the zoom
+   controls. "on" highlights with the accent color; "off" stays muted. */
+.topbar-autocomplete-toggle {
+  height: 24px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.topbar-autocomplete-toggle:hover {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.topbar-autocomplete-toggle.on {
+  color: var(--color-accent);
+}
+
+.topbar-autocomplete-toggle.on:hover {
+  color: var(--color-accent);
+}
+
+.topbar-autocomplete-state {
+  font-variant-numeric: tabular-nums;
+  min-width: 22px;
+  text-align: center;
+}
+
 body {
   font-family: var(--font-sans);
   background-color: var(--color-sidebar-center);
@@ -383,6 +421,133 @@ body {
 .terminal-item.active {
   background-color: var(--color-bg-tertiary);
   color: var(--color-accent);
+}
+
+/* Action cell on the right of each terminal row. The ⌘N shortcut badge and
+   the close button overlap in the same 22×22 cell and cross-fade: the badge
+   shows by default, the close button shows on row hover — so only one is ever
+   visible and they never sit side by side. */
+.terminal-row-actions {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.terminal-shortcut,
+.terminal-close-btn {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: opacity 0.15s;
+}
+
+/* ⌘N badge — visible by default (first three terminals only). */
+.terminal-shortcut {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+/* Close button — hidden by default, revealed on row hover. */
+.terminal-close-btn {
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.terminal-close-btn:hover {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+/* Cross-fade: hide the badge, show the close button on row hover. */
+.group:hover .terminal-shortcut {
+  opacity: 0;
+}
+.group:hover .terminal-close-btn {
+  opacity: 1;
+}
+
+/* Cmd+F find bar — floats in the top-right corner of the terminal area. */
+.terminal-search-bar {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  font-size: 12px;
+}
+
+.terminal-search-icon {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.terminal-search-input {
+  width: 160px;
+  border: none;
+  background: transparent;
+  outline: none;
+  color: var(--color-text-primary);
+  font-size: 12px;
+  font-family: var(--font-sans);
+}
+
+.terminal-search-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.terminal-search-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  min-width: 40px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.terminal-search-btn {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.terminal-search-btn:hover:not(:disabled) {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.terminal-search-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 /* SSH shortcut row — mirrors .terminal-item layout but holds two text lines */

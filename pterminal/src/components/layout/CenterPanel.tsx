@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
 import { useAppStore } from '@/stores/appStore';
+import { useI18n } from '@/i18n/I18nProvider';
 import { TerminalView } from '@/components/terminal/TerminalView';
+import { TerminalSearchBar } from '@/components/terminal/TerminalSearchBar';
 import { terminalRegistry } from '@/services/terminalRegistry';
 import { terminalService } from '@/services/terminalService';
 
@@ -13,6 +15,8 @@ import { terminalService } from '@/services/terminalService';
 export function CenterPanel() {
   const terminals = useAppStore((s) => s.terminals);
   const activeTerminalId = useAppStore((s) => s.activeTerminalId);
+  const isSearchBarVisible = useAppStore((s) => s.isSearchBarVisible);
+  const { t } = useI18n();
 
   return (
     <div className="panel h-full">
@@ -39,9 +43,9 @@ export function CenterPanel() {
                 style={{ width: 112, height: 112, opacity: 0.9, borderRadius: 24 }}
               />
               <div>
-                <p style={{ marginBottom: 8 }}>No active terminal</p>
+                <p style={{ marginBottom: 8 }}>{t('center.noActiveTerminal')}</p>
                 <p style={{ fontSize: 11 }}>
-                  Create or select a terminal from the left panel
+                  {t('center.createOrSelect')}
                 </p>
               </div>
             </div>
@@ -54,6 +58,12 @@ export function CenterPanel() {
               active={t.id === activeTerminalId}
             />
           ))
+        )}
+
+        {/* Cmd+F find bar — floats top-right over the active terminal. Keyed
+            by the active id so it resets keyword/state on a terminal switch. */}
+        {isSearchBarVisible && activeTerminalId && (
+          <TerminalSearchBar key={activeTerminalId} terminalId={activeTerminalId} />
         )}
       </div>
     </div>

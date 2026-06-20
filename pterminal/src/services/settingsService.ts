@@ -33,4 +33,6 @@ export const SETTING_KEYS = {
   // Terminal autocomplete toggles
   terminalAutocompleteEnabled: 'terminal_autocomplete_enabled',
   autocompleteEnabled: 'ai_autocomplete_enabled',
+  // Interface language ('en' | 'zh-CN'); absent = follow system.
+  language: 'ui_language',
 } as const;

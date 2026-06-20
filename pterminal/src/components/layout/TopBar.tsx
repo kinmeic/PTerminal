@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react';
-import { PanelLeft, PanelRight, Sun, Moon, ArrowLeft, ZoomIn, ZoomOut } from 'lucide-react';
+import { PanelLeft, PanelRight, Sun, Moon, ArrowLeft, ZoomIn, ZoomOut, Wand2 } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useAppStore } from '@/stores/appStore';
+import { useI18n } from '@/i18n/I18nProvider';
 import { DEFAULT_FONT_SIZE } from '@/stores/appStore';
 
 interface TopBarProps {
@@ -98,6 +99,12 @@ export function TerminalTopBar() {
   const activeFontSize = activeTerminal?.fontSize ?? defaultFontSize;
   const zoomPct = Math.round((activeFontSize / DEFAULT_FONT_SIZE) * 100);
 
+  // Terminal autocomplete quick toggle (icon + ON/OFF), placed left of the zoom
+  // controls so it's always one click away while working in the terminal.
+  const terminalAutocompleteEnabled = useAppStore((s) => s.terminalAutocompleteEnabled);
+  const setTerminalAutocompleteEnabled = useAppStore((s) => s.setTerminalAutocompleteEnabled);
+  const { t } = useI18n();
+
   const handleLeftBtnEnter = () => {
     // Cancel any pending hide so re-entering the button keeps the overlay open.
     cancelLeftPanelHoverHide();
@@ -114,7 +121,7 @@ export function TerminalTopBar() {
       leftSlot={
         <button
           className={`topbar-btn ${isLeftPanelVisible ? 'active' : ''}`}
-          title={isLeftPanelVisible ? '隐藏侧边栏' : '显示侧边栏'}
+          title={isLeftPanelVisible ? t('topbar.hideSidebar') : t('topbar.showSidebar')}
           onClick={toggleLeftPanel}
           onMouseEnter={handleLeftBtnEnter}
           onMouseLeave={handleLeftBtnLeave}
@@ -122,41 +129,51 @@ export function TerminalTopBar() {
           <PanelLeft size={16} strokeWidth={1.75} />
         </button>
       }
-      title={activeTerminal ? activeTerminal.name : 'No Terminal Selected'}
+      title={activeTerminal ? activeTerminal.name : t('topbar.noTerminalSelected')}
       rightSlot={
         <>
+          {/* Terminal autocomplete quick toggle (icon + ON/OFF). Sits left of
+              the zoom controls so completion is one click away while typing. */}
+          <button
+            className={`topbar-autocomplete-toggle ${terminalAutocompleteEnabled ? 'on' : 'off'}`}
+            title={terminalAutocompleteEnabled ? t('topbar.autocompleteOn') : t('topbar.autocompleteOff')}
+            onClick={() => void setTerminalAutocompleteEnabled(!terminalAutocompleteEnabled)}
+          >
+            <Wand2 size={14} strokeWidth={1.75} />
+            <span className="topbar-autocomplete-state">{terminalAutocompleteEnabled ? 'ON' : 'OFF'}</span>
+          </button>
           {/* Terminal zoom controls: shrink / percentage (click to reset) / grow */}
           <button
             className="topbar-btn"
-            title="缩小终端字号"
+            title={t('topbar.zoomOut')}
             onClick={() => void adjustTerminalFontSize(-1)}
           >
             <ZoomOut size={15} strokeWidth={1.75} />
           </button>
           <button
             className="topbar-zoom-label"
-            title={`缩放 ${zoomPct}%（点击重置为 100%）`}
+            title={t('topbar.zoomTooltip', { pct: zoomPct })}
             onClick={() => void adjustTerminalFontSize(DEFAULT_FONT_SIZE - activeFontSize)}
           >
             {zoomPct}%
           </button>
           <button
             className="topbar-btn"
-            title="放大终端字号"
+            title={t('topbar.zoomIn')}
             onClick={() => void adjustTerminalFontSize(1)}
           >
             <ZoomIn size={15} strokeWidth={1.75} />
           </button>
           <button
             className="topbar-btn"
-            title={isDarkMode ? '切换到亮色' : '切换到暗色'}
+            title={isDarkMode ? t('topbar.toLight') : t('topbar.toDark')}
             onClick={toggleDarkMode}
           >
             {isDarkMode ? <Sun size={15} strokeWidth={1.75} /> : <Moon size={15} strokeWidth={1.75} />}
           </button>
           <button
             className={`topbar-btn ${isRightPanelVisible ? 'active' : ''}`}
-            title={isRightPanelVisible ? '隐藏助手面板' : '显示助手面板'}
+            title={isRightPanelVisible ? t('topbar.hideAssistant') : t('topbar.showAssistant')}
             onClick={toggleRightPanel}
           >
             <PanelRight size={16} strokeWidth={1.75} />
@@ -169,14 +186,15 @@ export function TerminalTopBar() {
 
 /** Top bar variant for the settings view: back button + "设置" title. */
 export function SettingsTopBar({ onBack }: { onBack: () => void }) {
+  const { t } = useI18n();
   return (
     <TopBar
       leftSlot={
-        <button className="topbar-btn" title="返回终端" onClick={onBack}>
+        <button className="topbar-btn" title={t('topbar.backToTerminal')} onClick={onBack}>
           <ArrowLeft size={16} strokeWidth={1.75} />
         </button>
       }
-      title="设置"
+      title={t('common.settings')}
     />
   );
 }

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { ArrowLeft, ChevronDown, Plus, Pencil, Trash2, Server, X, Check, Settings, Bot, Wand2, type LucideIcon } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
+import { useI18n } from '@/i18n/I18nProvider';
+import { LANGUAGE_OPTIONS } from '@/i18n/translations';
 import { aiService } from '@/services/aiService';
 import { SettingsTopBar } from '@/components/layout/TopBar';
 import { loadProxyConfig, saveProxyConfig, type ProxyConfig } from '@/services/proxyService';
@@ -18,6 +20,7 @@ interface SettingsPageProps {
 export function SettingsPage({ onBack }: SettingsPageProps) {
   const [section, setSection] = useState<Section>('general');
   const leftWidth = useAppStore((s) => s.leftWidth);
+  const { t } = useI18n();
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden" style={{ backgroundColor: 'var(--color-bg-primary)' }}>
@@ -36,25 +39,25 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
         >
           <div className="flex-1 overflow-y-auto py-2">
             <MenuItem
-              label="常规"
+              label={t('settings.menu.general')}
               icon={Settings}
               active={section === 'general'}
               onClick={() => setSection('general')}
             />
             <MenuItem
-              label="大模型设置"
+              label={t('settings.menu.model')}
               icon={Bot}
               active={section === 'model'}
               onClick={() => setSection('model')}
             />
             <MenuItem
-              label="SSH 快捷方式"
+              label={t('settings.menu.ssh')}
               icon={Server}
               active={section === 'ssh'}
               onClick={() => setSection('ssh')}
             />
             <MenuItem
-              label="自定义补全"
+              label={t('settings.menu.completion')}
               icon={Wand2}
               active={section === 'completion'}
               onClick={() => setSection('completion')}
@@ -134,6 +137,9 @@ function GeneralSettings() {
   const setLineHeight = useAppStore((s) => s.setLineHeight);
   const setTerminalAutocompleteEnabled = useAppStore((s) => s.setTerminalAutocompleteEnabled);
   const setAutocompleteEnabled = useAppStore((s) => s.setAutocompleteEnabled);
+  const language = useAppStore((s) => s.language);
+  const setLanguage = useAppStore((s) => s.setLanguage);
+  const { t, effectiveLocale } = useI18n();
 
   const labelStyle: React.CSSProperties = {
     fontSize: 12,
@@ -158,15 +164,39 @@ function GeneralSettings() {
           color: 'var(--color-text-primary)',
         }}
       >
-        常规
+        {t('settings.general.title')}
       </h1>
       <p style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 28 }}>
-        配置终端字体与默认字号。字体对所有终端生效；默认字号用于新建终端，已有终端的字号可在顶部栏单独调整。
+        {t('settings.general.description')}
       </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
         <div>
-          <label style={labelStyle}>字体</label>
+          <label style={labelStyle}>{t('settings.general.language')}</label>
+          <div className="field-wrap">
+            <select
+              className="field-select"
+              value={language ?? ''}
+              onChange={(e) => {
+                const v = e.target.value;
+                setLanguage(v === '' ? null : (v as 'en' | 'zh-CN'));
+              }}
+            >
+              {LANGUAGE_OPTIONS.map((opt) => (
+                <option key={String(opt.value)} value={opt.value ?? ''}>
+                  {opt.label[effectiveLocale]}
+                </option>
+              ))}
+            </select>
+            <span className="field-chevron">
+              <ChevronDown size={16} strokeWidth={1.75} />
+            </span>
+          </div>
+          <div style={hintStyle}>{t('settings.general.languageHint')}</div>
+        </div>
+
+        <div>
+          <label style={labelStyle}>{t('settings.general.font')}</label>
           <div className="field-wrap">
             <select
               className="field-select"
@@ -187,12 +217,12 @@ function GeneralSettings() {
             </span>
           </div>
           <div style={hintStyle}>
-            仅当系统已安装所选字体时生效，否则回退到默认等宽字体。
+            {t('settings.general.fontHint')}
           </div>
         </div>
 
         <div>
-          <label style={labelStyle}>默认字号</label>
+          <label style={labelStyle}>{t('settings.general.defaultFontSize')}</label>
           <div className="field-wrap">
             <select
               className="field-select"
@@ -213,52 +243,52 @@ function GeneralSettings() {
             </span>
           </div>
           <div style={hintStyle}>
-            新建终端的初始字号（基准 13px = 100%）。已有终端可用顶部栏 +/− 单独缩放。
+            {t('settings.general.fontSizeHint')}
           </div>
         </div>
 
         <div>
-          <label style={labelStyle}>行间距</label>
+          <label style={labelStyle}>{t('settings.general.lineHeight')}</label>
           <div className="field-wrap">
             <select
               className="field-select"
               value={String(lineHeight)}
               onChange={(e) => void setLineHeight(Number(e.target.value))}
             >
-              <option value="0.8">紧凑 (0.8)</option>
-              <option value="0.9">较紧 (0.9)</option>
-              <option value="1">标准 (1.0)</option>
-              <option value="1.1">稍松 (1.1)</option>
-              <option value="1.2">宽松 (1.2)</option>
-              <option value="1.3">很松 (1.3)</option>
-              <option value="1.5">超松 (1.5)</option>
+              <option value="0.8">{t('lineHeight.compact')}</option>
+              <option value="0.9">{t('lineHeight.tight')}</option>
+              <option value="1">{t('lineHeight.standard')}</option>
+              <option value="1.1">{t('lineHeight.loose')}</option>
+              <option value="1.2">{t('lineHeight.wide')}</option>
+              <option value="1.3">{t('lineHeight.wider')}</option>
+              <option value="1.5">{t('lineHeight.widest')}</option>
             </select>
             <span className="field-chevron">
               <ChevronDown size={16} strokeWidth={1.75} />
             </span>
           </div>
           <div style={hintStyle}>
-            终端行与行之间的间距倍数，1.0 为紧凑无额外间距。
+            {t('settings.general.lineHeightHint')}
           </div>
         </div>
 
         <div>
-          <label style={labelStyle}>终端补全（实验性，不适合SSH使用）</label>
+          <label style={labelStyle}>{t('settings.general.autocompleteGroup')}</label>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <SettingsCheckbox
-              label="启用终端补全"
+              label={t('settings.general.enableCompletion')}
               checked={terminalAutocompleteEnabled}
               onChange={(checked) => void setTerminalAutocompleteEnabled(checked)}
             />
             <SettingsCheckbox
-              label="启用 AI 增强补全"
+              label={t('settings.general.enableAiCompletion')}
               checked={aiAutocompleteEnabled}
               disabled={!terminalAutocompleteEnabled}
               onChange={(checked) => void setAutocompleteEnabled(checked)}
             />
           </div>
           <div style={hintStyle}>
-            终端补全包含本地命令、路径与常用子命令；AI 增强只在需要时补充更完整的命令建议。
+            {t('settings.general.autocompleteHint')}
           </div>
         </div>
       </div>
@@ -276,6 +306,7 @@ function SocksProxySection() {
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const { t } = useI18n();
 
   useEffect(() => {
     let cancelled = false;
@@ -338,15 +369,15 @@ function SocksProxySection() {
           color: 'var(--color-text-primary)',
         }}
       >
-        SOCKS 代理
+        {t('settings.proxy.title')}
       </h2>
       <p style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 16 }}>
-        设置 SOCKS5 代理后，所有流量都走代理（内网 localhost/私有 IP 自动绕过）。可单独控制下方两类流量。
+        {t('settings.proxy.description')}
       </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div>
-          <label style={labelStyle}>代理地址</label>
+          <label style={labelStyle}>{t('settings.proxy.address')}</label>
           <input
             type="text"
             value={cfg.socksUrl}
@@ -356,18 +387,19 @@ function SocksProxySection() {
             style={inputStyle}
           />
           <div style={hintStyle}>
-            留空 = 直连。支持 <code>socks5://</code> 与 <code>socks5h://</code>（后者由代理解析 DNS）。
+            {t('settings.proxy.emptyDirect')} <code>socks5://</code> / <code>socks5h://</code>{' '}
+            {t('settings.proxy.dnsHint')}
           </div>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <ProxyCheckbox
-            label="AI 流量走代理"
+            label={t('settings.proxy.applyAi')}
             checked={cfg.applyAi}
             onChange={(v) => setCfg((c) => ({ ...c, applyAi: v }))}
           />
           <ProxyCheckbox
-            label="终端命令走代理"
+            label={t('settings.proxy.applyHttp')}
             checked={cfg.applyHttp}
             onChange={(v) => setCfg((c) => ({ ...c, applyHttp: v }))}
           />
@@ -379,10 +411,10 @@ function SocksProxySection() {
             onClick={handleSave}
             disabled={saving || !loaded}
           >
-            {saving ? '保存中…' : '保存并应用'}
+            {saving ? t('settings.proxy.saving') : t('settings.proxy.saveApply')}
           </button>
           {saved && (
-            <span style={{ fontSize: 12, color: 'var(--color-success)' }}>✓ 已应用</span>
+            <span style={{ fontSize: 12, color: 'var(--color-success)' }}>{t('settings.proxy.applied')}</span>
           )}
         </div>
       </div>
@@ -432,6 +464,7 @@ function ModelSettings() {
   const aiConfig = useAppStore((s) => s.aiConfig);
   const saveAiConfig = useAppStore((s) => s.saveAiConfig);
   const loadAiConfig = useAppStore((s) => s.loadAiConfig);
+  const { t } = useI18n();
 
   const [provider, setProvider] = useState('openai');
   const [baseUrl, setBaseUrl] = useState('');
@@ -524,15 +557,15 @@ function ModelSettings() {
           color: 'var(--color-text-primary)',
         }}
       >
-        大模型设置
+        {t('settings.model.title')}
       </h1>
       <p style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 28 }}>
-        配置 OpenAI 兼容的大模型服务（OpenAI、Ollama、DeepSeek、Moonshot 等）。
+        {t('settings.model.description')}
       </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
         <div>
-          <label style={labelStyle}>Provider</label>
+          <label style={labelStyle}>{t('settings.model.provider')}</label>
           <div className="field-wrap">
             <select
               className="field-select"
@@ -551,8 +584,8 @@ function ModelSettings() {
                 }
               }}
             >
-              <option value="openai">OpenAI 兼容</option>
-              <option value="ollama">Ollama (本地)</option>
+              <option value="openai">{t('settings.model.openaiCompatible')}</option>
+              <option value="ollama">{t('settings.model.ollamaLocal')}</option>
               <option value="deepseek">DeepSeek</option>
             </select>
             <span className="field-chevron">
@@ -562,7 +595,7 @@ function ModelSettings() {
         </div>
 
         <div>
-          <label style={labelStyle}>Base URL</label>
+          <label style={labelStyle}>{t('settings.model.baseUrl')}</label>
           <input
             type="text"
             value={baseUrl}
@@ -571,16 +604,16 @@ function ModelSettings() {
             style={fieldStyle}
           />
           <div style={hintStyle}>
-            OpenAI 兼容端点，不要带 <code>/v1</code> 后缀。例如：<code>https://api.openai.com</code>
+            {t('settings.model.baseUrlHint')} <code>https://api.openai.com</code>
           </div>
         </div>
 
         <div>
           <label style={labelStyle}>
-            API Key{' '}
+            {t('settings.model.apiKey')}{' '}
             {aiConfig?.hasApiKey && (
               <span style={{ color: 'var(--color-success)', fontWeight: 400 }}>
-                （已设置，留空则保持不变）
+                {t('settings.model.apiKeySet')}
               </span>
             )}
           </label>
@@ -588,13 +621,13 @@ function ModelSettings() {
             type="password"
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
-            placeholder={provider === 'ollama' ? '本地模型无需 API Key' : 'sk-...'}
+            placeholder={provider === 'ollama' ? t('settings.model.apiKeyPlaceholderOllama') : 'sk-...'}
             style={fieldStyle}
           />
         </div>
 
         <div>
-          <label style={labelStyle}>Model</label>
+          <label style={labelStyle}>{t('settings.model.model')}</label>
           <input
             type="text"
             value={model}
@@ -608,35 +641,35 @@ function ModelSettings() {
             }
             style={fieldStyle}
           />
-          <div style={hintStyle}>模型名称，需与服务端可用模型一致。</div>
+          <div style={hintStyle}>{t('settings.model.modelHint')}</div>
         </div>
 
         <div>
-          <label style={labelStyle}>AI 读取终端行数</label>
+          <label style={labelStyle}>{t('settings.model.contextLines')}</label>
           <div className="field-wrap">
             <select
               className="field-select"
               value={String(contextLines)}
               onChange={(e) => setContextLines(Number(e.target.value))}
             >
-              <option value="0">不读取</option>
-              <option value="20">20 行</option>
-              <option value="50">50 行（默认）</option>
-              <option value="100">100 行</option>
-              <option value="200">200 行</option>
-              <option value="500">500 行</option>
+              <option value="0">{t('settings.model.contextLinesNone')}</option>
+              <option value="20">20</option>
+              <option value="50">50{t('settings.model.contextLinesDefault')}</option>
+              <option value="100">100</option>
+              <option value="200">200</option>
+              <option value="500">500</option>
             </select>
             <span className="field-chevron">
               <ChevronDown size={16} strokeWidth={1.75} />
             </span>
           </div>
           <div style={hintStyle}>
-            发送 AI 消息时，自动将当前终端最近 N 行输出作为上下文一并发出。设为「不读取」可保护隐私或节省 token。
+            {t('settings.model.contextLinesHint')}
           </div>
         </div>
 
         <div>
-          <label style={labelStyle}>上下文窗口长度（tokens）</label>
+          <label style={labelStyle}>{t('settings.model.contextWindow')}</label>
           <input
             type="number"
             value={contextWindow}
@@ -647,12 +680,12 @@ function ModelSettings() {
             style={fieldStyle}
           />
           <div style={hintStyle}>
-            大模型的上下文窗口大小（token 数）。用于判断何时需要压缩历史对话。默认 200000。
+            {t('settings.model.contextWindowHint')}
           </div>
         </div>
 
         <div>
-          <label style={labelStyle}>上下文压缩阈值</label>
+          <label style={labelStyle}>{t('settings.model.compressionThreshold')}</label>
           <input
             type="number"
             value={compressionThreshold}
@@ -663,7 +696,7 @@ function ModelSettings() {
             style={fieldStyle}
           />
           <div style={hintStyle}>
-            当预估 token 数超过「窗口长度 × 阈值」时触发压缩。取值 0.1–1.0，默认 0.75。
+            {t('settings.model.compressionThresholdHint')}
           </div>
         </div>
 
@@ -673,13 +706,13 @@ function ModelSettings() {
             onClick={handleSave}
             disabled={saving}
           >
-            {saving ? '保存中…' : '保存'}
+            {saving ? t('settings.proxy.saving') : t('common.save')}
           </button>
           <button className="btn btn-secondary" onClick={handleTest} disabled={testing}>
-            {testing ? '测试中…' : '测试连接'}
+            {testing ? t('settings.model.testing') : t('settings.model.testConnection')}
           </button>
           {saved && (
-            <span style={{ fontSize: 12, color: 'var(--color-success)' }}>✓ 已保存</span>
+            <span style={{ fontSize: 12, color: 'var(--color-success)' }}>{t('settings.model.saved')}</span>
           )}
           {testResult && (
             <span
@@ -710,6 +743,7 @@ function SshSettings() {
   const addSshShortcut = useAppStore((s) => s.addSshShortcut);
   const editSshShortcut = useAppStore((s) => s.editSshShortcut);
   const removeSshShortcut = useAppStore((s) => s.removeSshShortcut);
+  const { t } = useI18n();
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -761,7 +795,7 @@ function SshSettings() {
         <button
           className="collapse-button"
           onClick={resetForm}
-          title="返回列表"
+          title={t('settings.ssh.backToList')}
           style={{ marginBottom: 16 }}
         >
           <ArrowLeft size={16} strokeWidth={1.75} />
@@ -774,10 +808,10 @@ function SshSettings() {
             color: 'var(--color-text-primary)',
           }}
         >
-          {editingId ? '编辑 SSH 快捷方式' : '新建 SSH 快捷方式'}
+          {editingId ? t('settings.ssh.editTitle') : t('settings.ssh.newTitle')}
         </h1>
         <p style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 24 }}>
-          {editingId ? '修改连接信息，保存后立即生效。' : '填写连接信息，保存后可在左侧边栏快速连接。'}
+          {editingId ? t('settings.ssh.editDesc') : t('settings.ssh.newDesc')}
         </p>
         <SshFormView
           form={form}
@@ -800,7 +834,7 @@ function SshSettings() {
             color: 'var(--color-text-primary)',
           }}
         >
-          SSH 快捷方式
+          {t('settings.ssh.listTitle')}
         </h1>
         <button
           className="btn btn-primary"
@@ -812,11 +846,11 @@ function SshSettings() {
           style={{ fontSize: 12, padding: '5px 12px' }}
         >
           <Plus size={14} strokeWidth={1.75} />
-          新建
+          {t('common.new')}
         </button>
       </div>
       <p style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 24 }}>
-        管理常用的 SSH 连接。在左侧边栏点击快捷方式即可快速打开新终端并连接。
+        {t('settings.ssh.listDesc')}
       </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -831,7 +865,7 @@ function SshSettings() {
               borderRadius: 8,
             }}
           >
-            暂无 SSH 快捷方式，点击「新建」添加。
+            {t('settings.ssh.empty')}
           </div>
         ) : (
           shortcuts.map((s) => (
@@ -857,6 +891,7 @@ function SshRow({
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useI18n();
   const hostLabel = `${shortcut.user}@${shortcut.host}${shortcut.port !== 22 ? `:${shortcut.port}` : ''}`;
   return (
     <div
@@ -887,10 +922,10 @@ function SshRow({
           {shortcut.identityFile ? `  ·  -i ${shortcut.identityFile}` : ''}
         </span>
       </div>
-      <button className="btn-icon" title="编辑" onClick={onEdit} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+      <button className="btn-icon" title={t('common.edit')} onClick={onEdit} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
         <Pencil size={14} strokeWidth={1.75} />
       </button>
-      <button className="btn-icon" title="删除" onClick={onDelete} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-danger)' }}>
+      <button className="btn-icon" title={t('common.delete')} onClick={onDelete} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-danger)' }}>
         <Trash2 size={14} strokeWidth={1.75} />
       </button>
     </div>
@@ -910,6 +945,7 @@ function SshFormView({
   onSubmit: (e: React.FormEvent) => void;
   onCancel: () => void;
 }) {
+  const { t } = useI18n();
   const labelStyle: React.CSSProperties = {
     fontSize: 12,
     fontWeight: 500,
@@ -938,12 +974,12 @@ function SshFormView({
       }}
     >
       <div>
-        <label style={labelStyle}>名称</label>
+        <label style={labelStyle}>{t('settings.ssh.name')}</label>
         <input
           type="text"
           value={form.name}
           onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-          placeholder="生产服务器"
+          placeholder={t('settings.ssh.namePlaceholder')}
           style={inputStyle}
           autoFocus
         />
@@ -973,7 +1009,7 @@ function SshFormView({
       </div>
 
       <div>
-        <label style={labelStyle}>用户名</label>
+        <label style={labelStyle}>{t('settings.ssh.user')}</label>
         <input
           type="text"
           value={form.user}
@@ -984,7 +1020,7 @@ function SshFormView({
       </div>
 
       <div>
-        <label style={labelStyle}>Identity File（可选）</label>
+        <label style={labelStyle}>{t('settings.ssh.identityFile')}</label>
         <input
           type="text"
           value={form.identityFile}
@@ -996,10 +1032,10 @@ function SshFormView({
 
       <div>
         <label style={labelStyle}>
-          密码（可选）{' '}
+          {t('settings.ssh.password')}{' '}
           {editingId && (
             <span style={{ color: 'var(--color-success)', fontWeight: 400 }}>
-              （已设置，留空则保持不变）
+              {t('settings.model.apiKeySet')}
             </span>
           )}
         </label>
@@ -1007,18 +1043,18 @@ function SshFormView({
           type="password"
           value={form.password}
           onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-          placeholder={editingId ? '留空保持不变' : '仅限内网/测试机，密码明文存储'}
+          placeholder={editingId ? t('settings.ssh.passwordKeep') : t('settings.ssh.passwordNewPlaceholder')}
           style={inputStyle}
         />
         <div style={{ fontSize: 11, color: 'var(--color-warning)', marginTop: 4 }}>
-          ⚠ 密码以明文存储在本地数据库，仅建议用于内网/测试环境。生产环境请使用密钥认证。
+          {t('settings.ssh.passwordWarning')}
         </div>
       </div>
 
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-start' }}>
         <button type="button" className="btn btn-secondary" onClick={onCancel}>
           <X size={14} strokeWidth={1.75} />
-          取消
+          {t('common.cancel')}
         </button>
         <button
           type="submit"
@@ -1026,7 +1062,7 @@ function SshFormView({
           disabled={!form.name.trim() || !form.host.trim() || !form.user.trim()}
         >
           <Check size={14} strokeWidth={1.75} />
-          {editingId ? '保存' : '添加'}
+          {editingId ? t('common.save') : t('common.add')}
         </button>
       </div>
     </form>
@@ -1043,6 +1079,7 @@ function CompletionSettings() {
   const addCompletion = useAppStore((s) => s.addCustomCompletion);
   const editCompletion = useAppStore((s) => s.editCustomCompletion);
   const removeCompletion = useAppStore((s) => s.removeCustomCompletion);
+  const { t } = useI18n();
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1078,7 +1115,7 @@ function CompletionSettings() {
         <button
           className="collapse-button"
           onClick={resetForm}
-          title="返回列表"
+          title={t('settings.ssh.backToList')}
           style={{ marginBottom: 16 }}
         >
           <ArrowLeft size={16} strokeWidth={1.75} />
@@ -1091,10 +1128,10 @@ function CompletionSettings() {
             color: 'var(--color-text-primary)',
           }}
         >
-          {editingId ? '编辑自定义补全' : '新建自定义补全'}
+          {editingId ? t('settings.completion.editTitle') : t('settings.completion.newTitle')}
         </h1>
         <p style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 24 }}>
-          填写带完整参数的命令，保存后会在终端补全中融入并自动去重。
+          {t('settings.completion.newDesc')}
         </p>
         <CompletionFormView
           form={form}
@@ -1117,7 +1154,7 @@ function CompletionSettings() {
             color: 'var(--color-text-primary)',
           }}
         >
-          自定义补全
+          {t('settings.completion.listTitle')}
         </h1>
         <button
           className="btn btn-primary"
@@ -1129,11 +1166,11 @@ function CompletionSettings() {
           style={{ fontSize: 12, padding: '5px 12px' }}
         >
           <Plus size={14} strokeWidth={1.75} />
-          新建
+          {t('common.new')}
         </button>
       </div>
       <p style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 24 }}>
-        管理带完整参数的自定义命令。
+        {t('settings.completion.listDesc')}
       </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1148,7 +1185,7 @@ function CompletionSettings() {
               borderRadius: 8,
             }}
           >
-            暂无自定义补全，点击「新建」添加。
+            {t('settings.completion.empty')}
           </div>
         ) : (
           completions.map((c) => (
@@ -1174,6 +1211,7 @@ function CompletionRow({
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <div
       style={{
@@ -1205,10 +1243,10 @@ function CompletionRow({
           {completion.command}
         </span>
       </div>
-      <button className="btn-icon" title="编辑" onClick={onEdit} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+      <button className="btn-icon" title={t('common.edit')} onClick={onEdit} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
         <Pencil size={14} strokeWidth={1.75} />
       </button>
-      <button className="btn-icon" title="删除" onClick={onDelete} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-danger)' }}>
+      <button className="btn-icon" title={t('common.delete')} onClick={onDelete} style={{ width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-danger)' }}>
         <Trash2 size={14} strokeWidth={1.75} />
       </button>
     </div>
@@ -1228,6 +1266,7 @@ function CompletionFormView({
   onSubmit: (e: React.FormEvent) => void;
   onCancel: () => void;
 }) {
+  const { t } = useI18n();
   const labelStyle: React.CSSProperties = {
     fontSize: 12,
     fontWeight: 500,
@@ -1261,7 +1300,7 @@ function CompletionFormView({
       }}
     >
       <div>
-        <label style={labelStyle}>命令（含完整参数）</label>
+        <label style={labelStyle}>{t('settings.completion.command')}</label>
         <input
           type="text"
           value={form.command}
@@ -1271,30 +1310,30 @@ function CompletionFormView({
           autoFocus
         />
         <div style={hintStyle}>
-          输入命令前缀时会作为补全候选，并与其他来源自动去重。
+          {t('settings.completion.commandHint')}
         </div>
       </div>
 
       <div>
-        <label style={labelStyle}>备注（可选）</label>
+        <label style={labelStyle}>{t('settings.completion.note')}</label>
         <input
           type="text"
           value={form.label}
           onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
-          placeholder="留空则使用命令本身"
+          placeholder={t('settings.completion.notePlaceholder')}
           style={inputStyle}
         />
-        <div style={hintStyle}>仅用于列表中显示，便于识别。</div>
+        <div style={hintStyle}>{t('settings.completion.noteHint')}</div>
       </div>
 
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-start' }}>
         <button type="button" className="btn btn-secondary" onClick={onCancel}>
           <X size={14} strokeWidth={1.75} />
-          取消
+          {t('common.cancel')}
         </button>
         <button type="submit" className="btn btn-primary" disabled={!form.command.trim()}>
           <Check size={14} strokeWidth={1.75} />
-          {editingId ? '保存' : '添加'}
+          {editingId ? t('common.save') : t('common.add')}
         </button>
       </div>
     </form>

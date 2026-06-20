@@ -1,5 +1,6 @@
 import { Server } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
+import { useI18n } from '@/i18n/I18nProvider';
 import { dismissTerminalAutocomplete } from '@/services/autocompleteEvents';
 import type { SshShortcut } from '@/types';
 
@@ -9,6 +10,7 @@ import type { SshShortcut } from '@/types';
  */
 export function SshShortcuts() {
   const shortcuts = useAppStore((s) => s.sshShortcuts);
+  const { t } = useI18n();
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -31,7 +33,7 @@ export function SshShortcuts() {
             color: 'var(--color-text-secondary)',
           }}
         >
-          SSH{shortcuts.length > 0 ? ` (${shortcuts.length})` : ''}
+          {t('ssh.title')}{shortcuts.length > 0 ? ` (${shortcuts.length})` : ''}
         </span>
       </div>
 
@@ -44,7 +46,7 @@ export function SshShortcuts() {
               color: 'var(--color-text-muted)',
             }}
           >
-            No SSH shortcuts.
+            {t('ssh.empty')}
           </div>
         ) : (
           shortcuts.map((s) => <SshRow key={s.id} shortcut={s} />)
@@ -56,6 +58,7 @@ export function SshShortcuts() {
 
 function SshRow({ shortcut }: { shortcut: SshShortcut }) {
   const openSshShortcut = useAppStore((s) => s.openSshShortcut);
+  const { t } = useI18n();
 
   const hostLabel = `${shortcut.user}@${shortcut.host}${shortcut.port !== 22 ? `:${shortcut.port}` : ''}`;
 
@@ -66,7 +69,7 @@ function SshRow({ shortcut }: { shortcut: SshShortcut }) {
         dismissTerminalAutocomplete();
         void openSshShortcut(shortcut);
       }}
-      title={`Connect to ${hostLabel}`}
+      title={t('ssh.connectTo', { host: hostLabel })}
     >
       <span style={{ display: 'inline-flex', color: 'var(--color-accent)', flexShrink: 0 }}>
         <Server size={14} strokeWidth={1.75} />

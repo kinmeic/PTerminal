@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '@/stores/appStore';
+import { useI18n } from '@/i18n/I18nProvider';
 
 interface CommandFormProps {
   /** When set, the form edits this command; otherwise it creates a new one. */
@@ -24,6 +25,7 @@ export function CommandForm({
   const activeTerminalId = useAppStore((s) => s.activeTerminalId);
   const addCommand = useAppStore((s) => s.addCommand);
   const editCommand = useAppStore((s) => s.editCommand);
+  const { t } = useI18n();
 
   useEffect(() => {
     setLabel(initialLabel);
@@ -71,7 +73,7 @@ export function CommandForm({
     >
       <input
         type="text"
-        placeholder="Label (e.g. List files)"
+        placeholder={t('commands.labelPlaceholder')}
         value={label}
         onChange={(e) => setLabel(e.target.value)}
         autoFocus
@@ -79,17 +81,17 @@ export function CommandForm({
       />
       <input
         type="text"
-        placeholder="Command (e.g. ls -la)"
+        placeholder={t('commands.commandPlaceholder')}
         value={command}
         onChange={(e) => setCommand(e.target.value)}
         style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }}
       />
       <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
         <button type="button" className="btn btn-secondary" onClick={onClose}>
-          Cancel
+          {t('common.cancel')}
         </button>
         <button type="submit" className="btn btn-primary">
-          {editingId ? 'Save' : 'Add'}
+          {editingId ? t('common.save') : t('common.add')}
         </button>
       </div>
     </form>

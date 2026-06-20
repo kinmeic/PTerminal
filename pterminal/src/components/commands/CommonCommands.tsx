@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Plus, Star, Play, X } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
+import { useI18n } from '@/i18n/I18nProvider';
 import { CommandForm } from './CommandForm';
 import type { Command } from '@/types';
 
@@ -17,9 +18,10 @@ export function CommonCommands() {
 
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Command | null>(null);
+  const { t } = useI18n();
 
   if (!activeTerminalId) {
-    return <EmptyHint text="Select a terminal to manage its commands." />;
+    return <EmptyHint text={t('commands.selectTerminal')} />;
   }
 
   const sorted = [...commands].sort(compareCommands);
@@ -45,11 +47,11 @@ export function CommonCommands() {
             color: 'var(--color-text-secondary)',
           }}
         >
-          Common Commands{commands.length > 0 ? ` (${commands.length})` : ''}
+          {t('commands.title')}{commands.length > 0 ? ` (${commands.length})` : ''}
         </span>
         <button
           className="btn-icon"
-          title="Add command"
+          title={t('commands.add')}
           onClick={() => {
             setEditing(null);
             setShowForm((v) => !v);
@@ -67,7 +69,7 @@ export function CommonCommands() {
       )}
 
       {commands.length === 0 && !showForm ? (
-        <EmptyHint text="No saved commands. Click + to add one." />
+        <EmptyHint text={t('commands.empty')} />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           {pinned.length > 0 && (
@@ -78,8 +80,8 @@ export function CommonCommands() {
                 textTransform: 'uppercase',
                 margin: '4px 0 2px',
               }}
-            >
-              Pinned
+              >
+              {t('common.pinned')}
             </div>
           )}
           {pinned.map((c) => (
@@ -103,8 +105,8 @@ export function CommonCommands() {
                 textTransform: 'uppercase',
                 margin: '6px 0 2px',
               }}
-            >
-              Others
+              >
+              {t('common.others')}
             </div>
           )}
           {unpinned.map((c) => (
@@ -150,6 +152,7 @@ function CommandRow({
   onTogglePin: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <div
       className="group"
@@ -160,7 +163,7 @@ function CommandRow({
         border: '1px solid var(--color-border)',
         cursor: 'pointer',
       }}
-      title={`Single-click: insert  |  Double-click: run\n${command.command}`}
+      title={t('commands.insertRunTooltip', { command: command.command })}
       onClick={() => onEdit()} // single click = edit inline (avoids accidental run)
       onDoubleClick={(e) => {
         e.stopPropagation();
@@ -188,7 +191,7 @@ function CommandRow({
         </span>
         <button
           className="btn-icon opacity-0 group-hover:opacity-100"
-          title={command.isPinned ? 'Unpin' : 'Pin to top'}
+          title={command.isPinned ? t('commands.unpin') : t('commands.pinToTop')}
           onClick={(e) => {
             e.stopPropagation();
             onTogglePin();
@@ -207,7 +210,7 @@ function CommandRow({
         </button>
         <button
           className="btn-icon opacity-0 group-hover:opacity-100"
-          title="Run now"
+          title={t('commands.runNow')}
           onClick={(e) => {
             e.stopPropagation();
             onRun();
@@ -226,7 +229,7 @@ function CommandRow({
         </button>
         <button
           className="btn-icon opacity-0 group-hover:opacity-100"
-          title="Delete"
+          title={t('common.delete')}
           onClick={(e) => {
             e.stopPropagation();
             onDelete();

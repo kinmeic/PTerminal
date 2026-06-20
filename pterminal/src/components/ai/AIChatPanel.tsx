@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Send, Square, Trash2 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
+import { useI18n } from '@/i18n/I18nProvider';
 import { aiService } from '@/services/aiService';
 import { terminalRegistry } from '@/services/terminalRegistry';
 import type { AIMessage } from '@/types';
@@ -20,6 +21,7 @@ export function AIChatPanel() {
   const aiConfig = useAppStore((s) => s.aiConfig);
   const runSuggestedCommand = useAppStore((s) => s.runSuggestedCommand);
   const [input, setInput] = useState('');
+  const { t } = useI18n();
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   /** Track when IME composition ended (to block Enter that confirms IME selection). */
@@ -52,7 +54,7 @@ export function AIChatPanel() {
   if (!activeTerminalId) {
     return (
       <div className="ai-empty">
-        Select a terminal to start chatting.
+        {t('ai.selectTerminal')}
       </div>
     );
   }
@@ -111,14 +113,13 @@ export function AIChatPanel() {
       <div ref={scrollRef} className="ai-chat-messages">
         {aiMessages.length === 0 ? (
           <div className="ai-chat-empty">
-            Ask anything about your terminal work — paste an error, request a
-            command, or get an explanation.
+            {t('ai.empty')}
           </div>
         ) : (
           <>
             {aiMessagesTotal > aiMessages.length && (
               <div className="ai-chat-truncated">
-                仅显示最近 {aiMessages.length} 条，另有 {aiMessagesTotal - aiMessages.length} 条更早消息未加载
+                {t('ai.truncated', { shown: aiMessages.length, hidden: aiMessagesTotal - aiMessages.length })}
               </div>
             )}
             {aiMessages.map((msg, idx) => (
@@ -152,7 +153,7 @@ export function AIChatPanel() {
               }
             }
           }}
-          placeholder="Ask the assistant…  (Shift+Enter for newline)"
+          placeholder={t('ai.placeholder')}
           rows={1}
           disabled={isAiStreaming}
         />
@@ -162,7 +163,7 @@ export function AIChatPanel() {
             className="btn btn-secondary ai-chat-clear"
             onClick={handleClear}
             disabled={isAiStreaming || aiMessages.length === 0}
-            title="Clear conversation"
+            title={t('ai.clearConversation')}
           >
             <Trash2 size={13} strokeWidth={1.75} />
           </button>
@@ -171,7 +172,7 @@ export function AIChatPanel() {
               type="button"
               className="btn btn-primary ai-chat-send"
               onClick={handleStop}
-              title="Stop generating"
+              title={t('ai.stopGenerating')}
             >
               <Square size={13} fill="currentColor" strokeWidth={1.75} />
             </button>
@@ -180,7 +181,7 @@ export function AIChatPanel() {
               type="submit"
               className="btn btn-primary ai-chat-send"
               disabled={!input.trim()}
-              title="Send"
+              title={t('ai.send')}
             >
               <Send size={14} strokeWidth={1.75} />
             </button>
@@ -201,6 +202,7 @@ const MessageBubble = memo(function MessageBubble({
   runSuggestedCommand: (terminalId: string, command: string) => Promise<void>;
 }) {
   const isUser = message.role === 'user';
+  const { t } = useI18n();
 
   // Strip <think>…</think> reasoning blocks from the displayed text. Some
   // providers (DeepSeek, Qwen, etc.) stream hidden chain-of-thought wrapped in
@@ -231,7 +233,7 @@ const MessageBubble = memo(function MessageBubble({
                 className="btn btn-primary"
                 onClick={() => void runSuggestedCommand(activeTerminalId, cmd)}
               >
-                Run
+                {t('ai.run')}
               </button>
             </div>
           ))}

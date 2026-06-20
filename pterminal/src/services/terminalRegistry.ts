@@ -1,6 +1,7 @@
 import { Terminal, type IDisposable } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
+import { SearchAddon } from '@xterm/addon-search';
 
 interface ImeFixState {
   textarea: HTMLTextAreaElement;
@@ -11,6 +12,8 @@ interface ImeFixState {
 interface TerminalEntry {
   term: Terminal;
   fit: FitAddon;
+  /** Search addon used by the Cmd+F find bar to highlight/jump between matches. */
+  search: SearchAddon;
   /** Buffer of PTY data received while the terminal is detached/unmounted. */
   pending: string[];
   /** Output queued for the next animation frame while the terminal is mounted. */
@@ -70,10 +73,14 @@ class TerminalRegistry {
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.loadAddon(new WebLinksAddon());
+    // Search addon powers the Cmd+F find bar (highlight matches + jump prev/next).
+    const search = new SearchAddon();
+    term.loadAddon(search);
 
     entry = {
       term,
       fit,
+      search,
       pending: [],
       writeQueue: '',
       writeRaf: 0,
@@ -286,6 +293,12 @@ class TerminalRegistry {
    */
   getTerminal(id: string): Terminal | undefined {
     return this.entries.get(id)?.term;
+  }
+
+  /** The SearchAddon for a terminal, used by the Cmd+F find bar to highlight
+   *  matches and jump between them. */
+  getSearch(id: string): SearchAddon | undefined {
+    return this.entries.get(id)?.search;
   }
 
   /** Re-apply the current CSS-variable-based theme to all live instances.

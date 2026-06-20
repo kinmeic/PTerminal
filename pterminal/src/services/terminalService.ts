@@ -6,6 +6,22 @@ import type {
   TerminalSize,
 } from '@/types';
 
+/**
+ * A terminal can be torn down (deleted / shell exited) while an async
+ * resize/write is still in flight. The backend then rejects with
+ * "terminal {id} not found" — a benign race, not a real error. Swallow it so
+ * it doesn't surface as an unhandled promise rejection; let other errors
+ * propagate.
+ */
+function tolerateTeardown<T>(p: Promise<T>): Promise<T> {
+  return p.catch((err) => {
+    if (typeof err === 'string' && /terminal .* not found$/.test(err)) {
+      return undefined as unknown as T;
+    }
+    throw err;
+  });
+}
+
 export const terminalService = {
   /** Spawn a new PTY-backed terminal session and persist its config. */
   spawn(input: SpawnTerminalInput = {}): Promise<Terminal> {
@@ -14,16 +30,18 @@ export const terminalService = {
 
   /** Write keyboard input (or a full command) to a terminal's PTY. */
   write(id: string, data: string): Promise<void> {
-    return invoke<void>('terminal_write', { id, data });
+    return tolerateTeardown(invoke<void>('terminal_write', { id, data }));
   },
 
   /** Resize the PTY to match the xterm.js viewport. */
   resize(id: string, size: TerminalSize): Promise<void> {
-    return invoke<void>('terminal_resize', {
-      id,
-      cols: size.cols,
-      rows: size.rows,
-    });
+    return tolerateTeardown(
+      invoke<void>('terminal_resize', {
+        id,
+        cols: size.cols,
+        rows: size.rows,
+      })
+    );
   },
 
   /** Kill a live session (does not delete the persisted config). */

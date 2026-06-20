@@ -2,6 +2,7 @@ import { type CSSProperties, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { terminalRegistry } from '@/services/terminalRegistry';
 import { useAppStore } from '@/stores/appStore';
+import { useI18n } from '@/i18n/I18nProvider';
 
 interface TerminalAutocompleteProps {
   terminalId: string;
@@ -79,6 +80,7 @@ export function TerminalAutocomplete({
   const globalFontSize = useAppStore((s) => s.fontSize);
   const fontSize = terminal?.fontSize ?? globalFontSize;
   const isDarkMode = useAppStore((s) => s.isDarkMode);
+  const { t } = useI18n();
 
   const recompute = () => {
     const term = terminalRegistry.getTerminal(terminalId);
@@ -336,7 +338,7 @@ export function TerminalAutocomplete({
           overflow: 'hidden',
         }}
       >
-        ↑↓ 选择 · Tab 确认 · Esc 关闭
+        {t('autocomplete.hint')}
       </div>
       <style>
         {`

@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useAppStore, DEFAULT_FONT_SIZE } from '@/stores/appStore';
 
 /**
@@ -6,8 +7,10 @@ import { useAppStore, DEFAULT_FONT_SIZE } from '@/stores/appStore';
  * because the PTY only receives printable keystrokes (handled by xterm's
  * onData, which does not forward Cmd-modified keys to the shell).
  *
- *  - Cmd+T           New terminal
- *  - Cmd+W           Close active terminal
+ *  - Cmd+T / Cmd+N   New terminal
+ *  - Cmd+W           Close active terminal (hides window if none remain)
+ *  - Cmd+1..3        Activate the 1st–3rd terminal in the sidebar
+ *  - Cmd+F           Toggle the terminal find bar
  *  - Cmd+Shift+]     Next terminal
  *  - Cmd+Shift+[     Previous terminal
  *  - Cmd+Shift+P     Toggle right panel
@@ -25,18 +28,42 @@ export function useKeyboardShortcuts(): void {
       const store = useAppStore.getState();
       const key = e.key;
 
-      // Cmd+T — new terminal
-      if (key === 't' && !e.shiftKey && !e.altKey) {
+      // Cmd+T or Cmd+N — new terminal
+      if ((key === 't' || key === 'n') && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         void store.createTerminal();
         return;
       }
 
-      // Cmd+W — close active terminal
+      // Cmd+W — close active terminal; if no terminals remain, hide the window
+      // to the Dock (same as the traffic-light close button, which never quits).
       if (key === 'w' && !e.shiftKey && !e.altKey) {
         e.preventDefault();
-        if (store.activeTerminalId) {
+        if (store.activeTerminalId && store.terminals.length > 0) {
           void store.deleteTerminal(store.activeTerminalId);
+        } else {
+          void getCurrentWindow().hide();
+        }
+        return;
+      }
+
+      // Cmd+1..3 — activate the Nth terminal in the sidebar list.
+      if (!e.shiftKey && !e.altKey && (key === '1' || key === '2' || key === '3')) {
+        const idx = Number(key) - 1;
+        const terminals = store.terminals;
+        if (idx < terminals.length) {
+          e.preventDefault();
+          store.setActiveTerminal(terminals[idx].id);
+        }
+        return;
+      }
+
+      // Cmd+F — toggle the find bar for the active terminal (prevents the
+      // webview's native in-page find from opening).
+      if (key === 'f' && !e.shiftKey && !e.altKey) {
+        if (store.activeTerminalId) {
+          e.preventDefault();
+          store.setSearchBarVisible(!store.isSearchBarVisible);
         }
         return;
       }

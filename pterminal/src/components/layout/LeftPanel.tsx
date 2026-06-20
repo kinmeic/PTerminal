@@ -10,6 +10,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
+import { useI18n } from '@/i18n/I18nProvider';
 import { SshShortcuts } from '@/components/ssh/SshShortcuts';
 import { dismissTerminalAutocomplete } from '@/services/autocompleteEvents';
 import type { Terminal } from '@/types';
@@ -27,6 +28,7 @@ export function LeftPanel() {
   const createTerminal = useAppStore((s) => s.createTerminal);
   const deleteTerminal = useAppStore((s) => s.deleteTerminal);
   const setActiveView = useAppStore((s) => s.setActiveView);
+  const { t } = useI18n();
 
   // Right-click context menu state.
   const [menu, setMenu] = useState<{ x: number; y: number; terminal: Terminal } | null>(null);
@@ -58,10 +60,10 @@ export function LeftPanel() {
     <div className="panel h-full">
       {/* Header */}
       <div className="panel-header justify-between">
-        <span>Terminals</span>
+        <span>{t('leftPanel.terminals')}</span>
           <button
             className="collapse-button"
-            title="New Terminal"
+            title={t('leftPanel.newTerminal')}
             onClick={() => {
               dismissTerminalAutocomplete();
               void createTerminal();
@@ -82,15 +84,16 @@ export function LeftPanel() {
               fontSize: 12,
             }}
           >
-            No terminals yet.
+            {t('leftPanel.empty')}
             <br />
-            Click + to create one.
+            {t('leftPanel.emptyHint')}
           </div>
         ) : (
-          terminals.map((t) => (
+          terminals.map((t, index) => (
             <TerminalRow
               key={t.id}
               terminal={t}
+              index={index}
               active={activeTerminalId === t.id}
               renaming={renamingId === t.id}
               onSelect={() => setActiveTerminal(t.id)}
@@ -149,7 +152,7 @@ export function LeftPanel() {
           }}
         >
           <Settings size={15} strokeWidth={1.75} />
-          <span>设置</span>
+          <span>{t('common.settings')}</span>
         </button>
       </div>
 
@@ -171,6 +174,7 @@ export function LeftPanel() {
 
 function TerminalRow({
   terminal,
+  index,
   active,
   renaming,
   onSelect,
@@ -179,6 +183,7 @@ function TerminalRow({
   onRenameDone,
 }: {
   terminal: Terminal;
+  index: number;
   active: boolean;
   renaming: boolean;
   onSelect: () => void;
@@ -189,6 +194,7 @@ function TerminalRow({
   const renameTerminal = useAppStore((s) => s.renameTerminal);
   const [draft, setDraft] = useState(terminal.name);
   const inputRef = useRef<HTMLInputElement>(null);
+  const { t } = useI18n();
 
   // Sync the draft when entering rename mode.
   useEffect(() => {
@@ -207,6 +213,11 @@ function TerminalRow({
     onRenameDone();
   };
 
+  // ⌘1..3 badge for the first three terminals in the list. Shown by default
+  // but hidden on hover so it never clashes with the close button (which fades
+  // in on hover) — the two swap places as the user mouses over a row.
+  const shortcut = index < 3 ? `⌘${index + 1}` : null;
+
   return (
     <div
       className={`terminal-item group ${active ? 'active' : ''}`}
@@ -216,7 +227,7 @@ function TerminalRow({
       {terminal.isPinned ? (
         <span
           style={{ display: 'inline-flex', color: 'var(--color-accent)', flexShrink: 0 }}
-          title="Pinned"
+          title={t('leftPanel.pinned')}
         >
           <Pin size={11} strokeWidth={2} fill="currentColor" />
         </span>
@@ -251,25 +262,29 @@ function TerminalRow({
       )}
 
       {!renaming && (
-        <button
-          className="btn-icon opacity-0 group-hover:opacity-100"
-          title="Delete terminal"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
-          style={{
-            padding: 2,
-            width: 22,
-            height: 22,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            lineHeight: 1,
-          }}
-        >
-          <X size={14} strokeWidth={1.75} />
-        </button>
+        // Action cell: the ⌘N shortcut badge and the close button share the
+        // same 22×22 cell and cross-fade — badge shows by default, close button
+        // shows on hover — so the two never sit side by side.
+        <div className="terminal-row-actions">
+          {shortcut && (
+            <span
+              className="terminal-shortcut"
+              style={{ color: active ? 'var(--color-accent)' : 'var(--color-text-muted)' }}
+            >
+              {shortcut}
+            </span>
+          )}
+          <button
+            className="terminal-close-btn"
+            title={t('leftPanel.deleteTerminal')}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+          >
+            <X size={14} strokeWidth={1.75} />
+          </button>
+        </div>
       )}
     </div>
   );
@@ -292,6 +307,7 @@ function TerminalContextMenu({
   const togglePinTerminal = useAppStore((s) => s.togglePinTerminal);
   const deleteTerminal = useAppStore((s) => s.deleteTerminal);
   const ref = useRef<HTMLDivElement>(null);
+  const { t } = useI18n();
 
   // Clamp position so the menu never overflows the viewport.
   const style: React.CSSProperties = { left: x, top: y };
@@ -332,23 +348,23 @@ function TerminalContextMenu({
           {terminal.isPinned ? (
             <>
               <PinOff size={14} strokeWidth={1.75} />
-              取消置顶
+              {t('leftPanel.unpin')}
             </>
           ) : (
             <>
               <Pin size={14} strokeWidth={1.75} />
-              置顶
+              {t('leftPanel.pin')}
             </>
           )}
         </button>
         <button className="context-menu-item" onClick={onRename}>
           <Pencil size={14} strokeWidth={1.75} />
-          重命名
+          {t('leftPanel.rename')}
         </button>
         <div className="context-menu-divider" />
         <button className="context-menu-item danger" onClick={handleDelete}>
           <Trash2 size={14} strokeWidth={1.75} />
-          删除
+          {t('common.delete')}
         </button>
       </div>
     </>

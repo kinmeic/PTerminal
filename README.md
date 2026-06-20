@@ -14,6 +14,7 @@ PTerminal is a macOS-native AI terminal built with Tauri v2, React, TypeScript, 
 - **SSH shortcuts** — store common SSH connections for faster remote access.
 - **Persistent local data** — terminals, commands, settings, SSH shortcuts, and AI conversations are stored locally in SQLite.
 - **Customizable terminal** — dark/light themes, terminal font, line height, per-terminal zoom, and optional autocomplete.
+- **Bilingual interface** — English and 简体中文, following the system language by default and switchable in Settings.
 
 ## Tech stack
 
@@ -75,8 +76,10 @@ Settings are saved locally. Do not commit API keys or secrets to the repository.
 
 | Shortcut | Action |
 | --- | --- |
-| `⌘T` | Create a new terminal |
-| `⌘W` | Close the active terminal |
+| `⌘T` / `⌘N` | Create a new terminal |
+| `⌘W` | Close the active terminal (hides the window when none remain) |
+| `⌘1` – `⌘3` | Activate the 1st–3rd terminal in the sidebar |
+| `⌘F` | Search terminal content |
 | `⌘⇧]` / `⌘⇧[` | Switch to next / previous terminal |
 | `⌘⇧P` | Toggle the assistant panel |
 | `⌘⇧L` | Toggle dark / light mode |

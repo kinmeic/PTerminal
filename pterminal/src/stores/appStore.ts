@@ -12,6 +12,7 @@ import { aiService } from '@/services/aiService';
 import { settingsService, SETTING_KEYS } from '@/services/settingsService';
 import { dismissTerminalAutocomplete } from '@/services/autocompleteEvents';
 import { toast } from '@/stores/toastStore';
+import { translate, resolveLocale, type Locale } from '@/i18n/translations';
 
 /** Terminal font defaults (used when no saved preference exists). */
 export const DEFAULT_FONT_FAMILY = "'SF Mono', 'Monaco', 'Consolas', monospace";
@@ -58,6 +59,17 @@ interface AppState {
   isFullscreen: boolean;
   /** Apply the current fullscreen state (drives top-bar layout). */
   setFullscreen: (v: boolean) => void;
+  /** Whether the Cmd+F find bar is open for the active terminal. Hiding it
+   *  also clears the search decorations on the terminal it was bound to. */
+  isSearchBarVisible: boolean;
+  setSearchBarVisible: (visible: boolean) => void;
+  /** True while a createTerminal spawn is in flight. Used to coalesce rapid
+   *  double-fire (held key, double-click) into a single terminal. */
+  isCreatingTerminal: boolean;
+  /** Interface language override. null = follow the system language. */
+  language: Locale | null;
+  /** Persist the interface language (null = follow system). */
+  setLanguage: (locale: Locale | null) => void;
 
   // Top-level view switch
   activeView: 'terminal' | 'settings';
@@ -219,6 +231,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   isLeftPanelVisible: true,
   isLeftPanelHovering: false,
   isFullscreen: false,
+  isSearchBarVisible: false,
+  isCreatingTerminal: false,
+  language: null,
   activeView: 'terminal',
   fontFamily: DEFAULT_FONT_FAMILY,
   fontSize: DEFAULT_FONT_SIZE,
@@ -228,12 +243,19 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setActiveTerminal: (id) => {
     dismissTerminalAutocomplete();
+    const prevId = get().activeTerminalId;
+    // Switching terminals closes the find bar and drops the old terminal's
+    // search highlights so they don't linger on a non-active terminal.
+    if (prevId && prevId !== id) {
+      terminalRegistry.getSearch(prevId)?.clearDecorations();
+    }
     const requestId = id ? get().aiStreams[id] ?? null : null;
     set({
       activeTerminalId: id,
       isAiStreaming: Boolean(requestId),
       activeAiRequestId: requestId,
       activeAiTerminalId: requestId ? id : null,
+      isSearchBarVisible: false,
     });
     if (id) {
       void get().ensureSession(id);
@@ -273,7 +295,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   createTerminal: async (opts) => {
+    // Guard against rapid double-fire: a keydown can repeat (held key) or a
+    // button can be double-clicked while the async spawn is still in flight.
+    // Coalesce concurrent createTerminal calls so we never end up with two
+    // terminals from a single user intent.
+    if (get().isCreatingTerminal) return null;
+    set({ isCreatingTerminal: true });
     dismissTerminalAutocomplete();
+    const prevId = get().activeTerminalId;
     try {
       const terminal = await terminalService.spawn({
         name: opts?.name,
@@ -281,14 +310,22 @@ export const useAppStore = create<AppState>((set, get) => ({
         cols: 80,
         rows: 24,
       });
+      // Switching focus to the new terminal: close the find bar and clear the
+      // previous terminal's search highlights so they don't linger.
+      if (prevId && prevId !== terminal.id) {
+        terminalRegistry.getSearch(prevId)?.clearDecorations();
+      }
       set((state) => ({
         terminals: [...state.terminals, terminal].sort(compareTerminals),
         activeTerminalId: terminal.id,
         commonCommands: [],
+        isSearchBarVisible: false,
+        isCreatingTerminal: false,
       }));
       return terminal.id;
     } catch (err) {
-      toast.error('Failed to create terminal'); console.error(err);
+      set({ isCreatingTerminal: false });
+      toast.error(tt('toast.createTerminalFailed')); console.error(err);
       return null;
     }
   },
@@ -305,10 +342,16 @@ export const useAppStore = create<AppState>((set, get) => ({
               ? filtered[filtered.length - 1].id
               : null
             : state.activeTerminalId;
-        return { terminals: filtered, activeTerminalId: newActive };
+        // If the active terminal was deleted, drop the find bar (its xterm is
+        // disposed below, so there's nothing left to search).
+        return {
+          terminals: filtered,
+          activeTerminalId: newActive,
+          isSearchBarVisible: state.activeTerminalId === id ? false : state.isSearchBarVisible,
+        };
       });
     } catch (err) {
-      toast.error('Failed to delete terminal'); console.error(err);
+      toast.error(tt('toast.deleteTerminalFailed')); console.error(err);
     }
   },
 
@@ -328,7 +371,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         terminals: state.terminals.map((t) => (t.id === id ? updated : t)),
       }));
     } catch (err) {
-      toast.error('Failed to rename terminal'); console.error(err);
+      toast.error(tt('toast.renameTerminalFailed')); console.error(err);
     }
   },
 
@@ -344,7 +387,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           .sort(compareTerminals),
       }));
     } catch (err) {
-      toast.error('Failed to pin terminal'); console.error(err);
+      toast.error(tt('toast.pinTerminalFailed')); console.error(err);
     }
   },
 
@@ -362,7 +405,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const created = await commandService.create(input);
       set((state) => ({ commonCommands: [...state.commonCommands, created] }));
     } catch (err) {
-      toast.error('Failed to add command'); console.error(err);
+      toast.error(tt('toast.addCommandFailed')); console.error(err);
     }
   },
 
@@ -375,7 +418,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         ),
       }));
     } catch (err) {
-      toast.error('Failed to update command'); console.error(err);
+      toast.error(tt('toast.updateCommandFailed')); console.error(err);
     }
   },
 
@@ -386,7 +429,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         commonCommands: state.commonCommands.filter((c) => c.id !== id),
       }));
     } catch (err) {
-      toast.error('Failed to delete command'); console.error(err);
+      toast.error(tt('toast.deleteCommandFailed')); console.error(err);
     }
   },
 
@@ -428,7 +471,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
       set((state) => ({ customCompletions: [...state.customCompletions, created] }));
     } catch (err) {
-      toast.error('Failed to add custom completion'); console.error(err);
+      toast.error(tt('toast.addCompletionFailed')); console.error(err);
     }
   },
 
@@ -439,7 +482,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         customCompletions: state.customCompletions.map((c) => (c.id === id ? updated : c)),
       }));
     } catch (err) {
-      toast.error('Failed to update custom completion'); console.error(err);
+      toast.error(tt('toast.updateCompletionFailed')); console.error(err);
     }
   },
 
@@ -450,7 +493,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         customCompletions: state.customCompletions.filter((c) => c.id !== id),
       }));
     } catch (err) {
-      toast.error('Failed to delete custom completion'); console.error(err);
+      toast.error(tt('toast.deleteCompletionFailed')); console.error(err);
     }
   },
 
@@ -468,7 +511,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const created = await sshService.create(input);
       set((state) => ({ sshShortcuts: [...state.sshShortcuts, created] }));
     } catch (err) {
-      toast.error('Failed to add SSH shortcut'); console.error(err);
+      toast.error(tt('toast.addSshFailed')); console.error(err);
     }
   },
 
@@ -479,7 +522,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         sshShortcuts: state.sshShortcuts.map((s) => (s.id === id ? updated : s)),
       }));
     } catch (err) {
-      toast.error('Failed to update SSH shortcut'); console.error(err);
+      toast.error(tt('toast.updateSshFailed')); console.error(err);
     }
   },
 
@@ -490,7 +533,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         sshShortcuts: state.sshShortcuts.filter((s) => s.id !== id),
       }));
     } catch (err) {
-      toast.error('Failed to delete SSH shortcut'); console.error(err);
+      toast.error(tt('toast.deleteSshFailed')); console.error(err);
     }
   },
 
@@ -543,7 +586,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         }, 3000);
       }
     } catch (err) {
-      toast.error('Failed to open SSH session'); console.error(err);
+      toast.error(tt('toast.openSshFailed')); console.error(err);
     }
   },
 
@@ -561,7 +604,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await aiService.saveSettings(settings);
       await get().loadAiConfig();
     } catch (err) {
-      toast.error('Failed to save AI settings'); console.error(err);
+      toast.error(tt('toast.saveAiFailed')); console.error(err);
     }
   },
 
@@ -579,7 +622,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await aiService.clearMessages(terminalId);
       set({ aiMessages: [], aiMessagesTotal: 0 });
     } catch (err) {
-      toast.error('Failed to clear AI messages'); console.error(err);
+      toast.error(tt('toast.clearAiFailed')); console.error(err);
     }
   },
 
@@ -690,6 +733,25 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setFullscreen: (v) => set({ isFullscreen: v }),
 
+  setSearchBarVisible: (visible) => {
+    // Closing the find bar also clears the search highlights on the active
+    // terminal so they don't linger after the bar is gone.
+    if (!visible) {
+      const id = get().activeTerminalId;
+      if (id) terminalRegistry.getSearch(id)?.clearDecorations();
+    }
+    set({ isSearchBarVisible: visible });
+  },
+
+  setLanguage: (locale) => {
+    set({ language: locale });
+    // Persist: store empty string for "follow system" so a null/absent value on
+    // reload is unambiguously interpreted as "follow system".
+    void settingsService
+      .set(SETTING_KEYS.language, locale ?? '')
+      .catch(() => {});
+  },
+
   toggleRightPanel: () =>
     set((state) => {
       const next = !state.isRightPanelVisible;
@@ -733,12 +795,13 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   loadUiState: async () => {
     try {
-      const [leftVis, rightVis, dark, leftW, rightW] = await Promise.all([
+      const [leftVis, rightVis, dark, leftW, rightW, lang] = await Promise.all([
         settingsService.get(SETTING_KEYS.leftPanelVisible),
         settingsService.get(SETTING_KEYS.rightPanelVisible),
         settingsService.get(SETTING_KEYS.isDarkMode),
         settingsService.get(SETTING_KEYS.leftWidth),
         settingsService.get(SETTING_KEYS.rightWidth),
+        settingsService.get(SETTING_KEYS.language),
       ]);
       const patch: Partial<AppState> = {};
       if (leftVis !== null) patch.isLeftPanelVisible = leftVis === '1';
@@ -752,6 +815,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (lw >= MIN_PANEL_WIDTH && lw <= MAX_PANEL_WIDTH) patch.leftWidth = lw;
       const rw = rightW ? Number(rightW) : 0;
       if (rw >= MIN_PANEL_WIDTH && rw <= MAX_PANEL_WIDTH) patch.rightWidth = rw;
+      // Language: a stored non-empty value is the explicit choice; anything else
+      // (absent/empty) means "follow system" → leave language as null.
+      if (lang === 'en' || lang === 'zh-CN') {
+        patch.language = lang;
+      } else {
+        patch.language = null;
+      }
+      // Mirror the effective locale onto <html lang> for accessibility/a11y.
+      document.documentElement.lang = resolveLocale(patch.language);
       set(patch);
     } catch (err) {
       console.error('Failed to load UI state:', err);
@@ -884,6 +956,18 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setAiMessages: (messages) => set({ aiMessages: messages }),
 }));
+
+/**
+ * Translate a toast key for the CURRENT language. The store lives outside the
+ * React tree so it can't use the I18nProvider context; instead it reads the
+ * persisted language choice from its own state (falling back to the detected
+ * system locale before the store has finished loading). Defined after the store
+ * so it can call `useAppStore.getState()`.
+ */
+function tt(key: string, params?: Record<string, string | number>): string {
+  const locale = resolveLocale(useAppStore.getState().language);
+  return translate(locale, key, params);
+}
 
 /** Sort: pinned first (by pinOrder), then by createdAt. */
 function compareCommands(a: Command, b: Command): number {

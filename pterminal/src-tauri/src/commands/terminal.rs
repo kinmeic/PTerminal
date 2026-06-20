@@ -207,15 +207,45 @@ pub fn terminal_spawn(
             let shell = input.shell.clone().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| {
                 std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
             });
-            let name = input.name.clone().unwrap_or_else(|| new_terminal_name(&state));
-            let sort_order = next_sort_order(&state);
             let env_json = input.env.as_ref().map(|m| serde_json::to_string(m).unwrap_or_default());
+            // Compute name + sort_order AND insert in a single transaction. This
+            // serializes concurrent spawns (e.g. a rapid double-click firing two
+            // terminal_spawn at once): each transaction sees the prior INSERT,
+            // so MAX(sort_order) advances instead of two rows colliding on the
+            // same name/sequence. Without this, two concurrent spawns both read
+            // MAX=0 and both produce "Terminal 1".
             let conn: DbConn = state.db.get().map_err(|e| e.to_string())?;
-            conn.execute(
-                "INSERT INTO terminals (id, name, cwd, shell, env, created_at, updated_at, is_active, sort_order, is_pinned, pin_order)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, 1, ?7, 0, 0)",
-                params![id, name, cwd, shell, env_json, now, sort_order],
-            ).map_err(|e| e.to_string())?;
+            let (name, sort_order) = if let Some(explicit) = input.name.as_ref() {
+                (explicit.clone(), next_sort_order(&state))
+            } else {
+                let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+                let seq: i64 = tx
+                    .query_row(
+                        "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM terminals",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or(1);
+                let name = localized_terminal_name(&state, seq);
+                tx.execute(
+                    "INSERT INTO terminals (id, name, cwd, shell, env, created_at, updated_at, is_active, sort_order, is_pinned, pin_order)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, 1, ?7, 0, 0)",
+                    params![id, name, cwd, shell, env_json, now, seq],
+                )
+                .map_err(|e| e.to_string())?;
+                tx.commit().map_err(|e| e.to_string())?;
+                (name, seq)
+            };
+            // If a name was explicitly supplied, we still need to INSERT (the
+            // auto-name branch above did it inside the transaction).
+            if input.name.is_some() {
+                conn.execute(
+                    "INSERT INTO terminals (id, name, cwd, shell, env, created_at, updated_at, is_active, sort_order, is_pinned, pin_order)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, 1, ?7, 0, 0)",
+                    params![id, name, cwd, shell, env_json, now, sort_order],
+                )
+                .map_err(|e| e.to_string())?;
+            }
             (id, name, cwd, shell, env_json, sort_order)
         };
 
@@ -1102,22 +1132,30 @@ fn next_sort_order(state: &AppState) -> i64 {
     .unwrap_or(0)
 }
 
-fn new_terminal_name(state: &AppState) -> String {
-    // Derive the name from MAX(sort_order)+1 rather than COUNT(*)+1: sort_order
-    // is monotonically increasing, so deleting a middle terminal (e.g.
-    // "Terminal 2") won't cause the next one to reuse a name that still exists.
-    let seq: i64 = state
+/// Build the default name for a newly-created terminal, localized to the saved
+/// UI language. Falls back to English ("Terminal N") when no language is set
+/// ("follow system") or on any read error — the frontend's `detectSystemLocale`
+/// can't be consulted from Rust, so an explicit Chinese choice is required to
+/// get "终端 N".
+fn localized_terminal_name(state: &AppState, seq: i64) -> String {
+    let lang = state
         .db
         .get()
         .ok()
         .and_then(|c| {
-            c.query_row("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM terminals", [], |r| {
-                r.get(0)
-            })
+            c.query_row(
+                "SELECT value FROM settings WHERE key = 'ui_language'",
+                [],
+                |r| r.get::<_, Option<String>>(0),
+            )
             .ok()
-        })
-        .unwrap_or(1);
-    format!("Terminal {seq}")
+            .flatten()
+        });
+    match lang.as_deref() {
+        Some("zh-CN") => format!("终端 {seq}"),
+        // English is the default/fallback (includes "follow system").
+        _ => format!("Terminal {seq}"),
+    }
 }
 
 fn poll_timeout_until(deadline: Option<Instant>) -> libc::c_int {

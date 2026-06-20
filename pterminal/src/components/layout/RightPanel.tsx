@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { useAppStore } from '@/stores/appStore';
+import { useI18n } from '@/i18n/I18nProvider';
 import { CommonCommands } from '@/components/commands/CommonCommands';
 
 type Tab = 'commands' | 'ai';
@@ -15,6 +16,7 @@ export function RightPanel() {
   const loadCommands = useAppStore((s) => s.loadCommands);
   const loadAiConfig = useAppStore((s) => s.loadAiConfig);
   const [tab, setTab] = useState<Tab>('commands');
+  const { t } = useI18n();
 
   // Load terminal-scoped data whenever the active terminal changes.
   useEffect(() => {
@@ -34,12 +36,12 @@ export function RightPanel() {
       <div className="panel-header" style={{ padding: 0, gap: 0 }}>
         <div style={{ display: 'flex', flex: 1, height: '100%' }}>
           <TabButton
-            label="命令"
+            label={t('right.commandsTab')}
             active={tab === 'commands'}
             onClick={() => setTab('commands')}
           />
           <TabButton
-            label="AI 助手"
+            label={t('right.aiTab')}
             active={tab === 'ai'}
             onClick={() => setTab('ai')}
           />
@@ -81,7 +83,7 @@ export function RightPanel() {
             alt="PTerminal"
             style={{ width: 96, height: 96, opacity: 0.9, borderRadius: 20 }}
           />
-          <span>Select a terminal to view its commands.</span>
+          <span>{t('right.selectTerminal')}</span>
         </div>
       )}
     </div>
