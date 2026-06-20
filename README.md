@@ -97,13 +97,6 @@ PTerminal/
 
 The repository includes a GitHub Actions workflow at `.github/workflows/release.yml` for building macOS DMG releases for Apple Silicon and Intel Macs when version tags are pushed.
 
-## Share on X.com
-
-> Meet PTerminal — a macOS-native AI terminal built with Tauri, React, and Rust.\
-> Isolated PTY sessions, saved commands, SSH shortcuts, local SQLite persistence, and AI help for command generation + output explanation.\
-> BSD 3-Clause.\
-> #Terminal #AI #macOS #Tauri #Rust
-
 ## License
 
 PTerminal is licensed under the [BSD 3-Clause License](LICENSE).
