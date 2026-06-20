@@ -38,7 +38,7 @@ PTerminal is a macOS-native AI terminal built with Tauri v2, React, TypeScript, 
 ## Getting started
 
 ```bash
-git clone https://github.com/eugenechanch/PTerminal.git
+git clone https://github.com/kinmeic/PTerminal.git
 cd PTerminal/pterminal
 npm install
 npm run tauri dev
