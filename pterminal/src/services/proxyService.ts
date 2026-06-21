@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { settingsService, SETTING_KEYS } from './settingsService';
+import { validateProxyUrl } from '@/utils/validation';
 
 /**
  * SOCKS proxy configuration (需求 3). All four settings live in the same
@@ -45,6 +46,8 @@ export async function loadProxyConfig(): Promise<ProxyConfig> {
  * the reload are sequential — if a write fails we surface it before reload.
  */
 export async function saveProxyConfig(cfg: ProxyConfig): Promise<void> {
+  const result = validateProxyUrl(cfg.socksUrl);
+  if (!result.valid) throw new Error(result.error);
   await settingsService.set(SETTING_KEYS.proxySocksUrl, cfg.socksUrl.trim());
   await settingsService.set(SETTING_KEYS.proxyApplyAi, cfg.applyAi ? TRUE : FALSE);
   await settingsService.set(SETTING_KEYS.proxyApplyHttp, cfg.applyHttp ? TRUE : FALSE);

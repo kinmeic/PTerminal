@@ -1,6 +1,21 @@
+[workspace]
+members = ["."]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# Allowed lints (too noisy for this project)
+module_name_repetitions = "allow"
+struct_excessive_bools = "allow"
+too_many_lines = "allow"
+
 [package]
 name = "app"
-version = "0.1.17"
+version = "1.2.0"
 description = "PTerminal - macOS native AI terminal"
 authors = ["you"]
 license = ""

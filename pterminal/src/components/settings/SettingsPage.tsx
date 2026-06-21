@@ -1,14 +1,25 @@
-import { useEffect, useState } from 'react';
-import { ArrowLeft, ChevronDown, Plus, Pencil, Trash2, Server, X, Check, Settings, Bot, Wand2, type LucideIcon } from 'lucide-react';
+import { useEffect, useState, useCallback } from 'react';
+import { ArrowLeft, ChevronDown, Plus, Pencil, Trash2, Server, X, Check, Settings, Bot, Wand2, Keyboard, RotateCcw, type LucideIcon } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useI18n } from '@/i18n/I18nProvider';
 import { LANGUAGE_OPTIONS } from '@/i18n/translations';
 import { aiService } from '@/services/aiService';
 import { SettingsTopBar } from '@/components/layout/TopBar';
 import { loadProxyConfig, saveProxyConfig, type ProxyConfig } from '@/services/proxyService';
+import {
+  loadShortcuts,
+  saveShortcuts,
+  resetShortcuts,
+  formatShortcut,
+  validateShortcut,
+  updateShortcutBinding,
+  type ShortcutDef,
+  type ShortcutBinding,
+  type Modifier,
+} from '@/services/shortcutService';
 import type { AIConfig, AISettings, Command, SshShortcut } from '@/types';
 
-type Section = 'general' | 'model' | 'ssh' | 'completion';
+type Section = 'general' | 'model' | 'ssh' | 'completion' | 'shortcuts';
 
 interface SettingsPageProps {
   onBack: () => void;
@@ -62,6 +73,12 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
               active={section === 'completion'}
               onClick={() => setSection('completion')}
             />
+            <MenuItem
+              label={t('settings.menu.shortcuts')}
+              icon={Keyboard}
+              active={section === 'shortcuts'}
+              onClick={() => setSection('shortcuts')}
+            />
           </div>
         </div>
 
@@ -74,6 +91,7 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
           {section === 'model' && <ModelSettings />}
           {section === 'ssh' && <SshSettings />}
           {section === 'completion' && <CompletionSettings />}
+          {section === 'shortcuts' && <ShortcutsSettings />}
         </div>
       </div>
     </div>
@@ -1337,5 +1355,263 @@ function CompletionFormView({
         </button>
       </div>
     </form>
+  );
+}
+
+// ---- Keyboard shortcuts settings -------------------------------------------
+
+function ShortcutsSettings() {
+  const { t } = useI18n();
+  const [shortcuts, setShortcuts] = useState<ShortcutDef[]>(loadShortcuts);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [conflict, setConflict] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  const handleReset = useCallback(() => {
+    const reset = resetShortcuts();
+    setShortcuts(reset);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }, []);
+
+  const handleBindingChange = useCallback(
+    (id: string, binding: ShortcutBinding) => {
+      const result = validateShortcut(shortcuts, id, binding);
+      if (!result.valid) {
+        const conflictShortcut = shortcuts.find((s) => s.id === result.conflict);
+        setConflict(conflictShortcut?.descriptionKey ?? result.conflict ?? null);
+        return;
+      }
+      setConflict(null);
+      const updated = updateShortcutBinding(shortcuts, id, binding);
+      setShortcuts(updated);
+      saveShortcuts(updated);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    },
+    [shortcuts]
+  );
+
+  const categories: { key: ShortcutDef['category']; label: string }[] = [
+    { key: 'navigation', label: t('shortcuts.category.navigation') },
+    { key: 'terminal', label: t('shortcuts.category.terminal') },
+    { key: 'panel', label: t('shortcuts.category.panel') },
+  ];
+
+  return (
+    <div style={{ width: '100%', maxWidth: 640, padding: '32px 40px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <h1
+          style={{
+            fontSize: 20,
+            fontWeight: 600,
+            color: 'var(--color-text-primary)',
+          }}
+        >
+          {t('settings.shortcuts.title')}
+        </h1>
+        <button
+          className="btn btn-secondary"
+          onClick={handleReset}
+          style={{ fontSize: 12, padding: '5px 12px' }}
+        >
+          <RotateCcw size={14} strokeWidth={1.75} />
+          {t('settings.shortcuts.reset')}
+        </button>
+      </div>
+      <p style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 24 }}>
+        {t('settings.shortcuts.description')}
+      </p>
+
+      {saved && (
+        <div
+          style={{
+            padding: '8px 12px',
+            borderRadius: 6,
+            backgroundColor: 'var(--color-success-bg, rgba(34, 197, 94, 0.1))',
+            color: 'var(--color-success)',
+            fontSize: 13,
+            marginBottom: 16,
+          }}
+        >
+          {t('settings.shortcuts.saved')}
+        </div>
+      )}
+
+      {conflict && (
+        <div
+          style={{
+            padding: '8px 12px',
+            borderRadius: 6,
+            backgroundColor: 'var(--color-danger-bg, rgba(239, 68, 68, 0.1))',
+            color: 'var(--color-danger)',
+            fontSize: 13,
+            marginBottom: 16,
+          }}
+        >
+          {t('settings.shortcuts.conflict', { shortcut: t(conflict) })}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+        {categories.map((cat) => {
+          const catShortcuts = shortcuts.filter((s) => s.category === cat.key);
+          if (catShortcuts.length === 0) return null;
+          return (
+            <div key={cat.key}>
+              <h2
+                style={{
+                  fontSize: 14,
+                  fontWeight: 600,
+                  color: 'var(--color-text-secondary)',
+                  marginBottom: 12,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                }}
+              >
+                {cat.label}
+              </h2>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {catShortcuts.map((s) => (
+                  <ShortcutRow
+                    key={s.id}
+                    shortcut={s}
+                    isEditing={editingId === s.id}
+                    onEdit={() => setEditingId(editingId === s.id ? null : s.id)}
+                    onBindingChange={(binding) => handleBindingChange(s.id, binding)}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ShortcutRow({
+  shortcut,
+  isEditing,
+  onEdit,
+  onBindingChange,
+}: {
+  shortcut: ShortcutDef;
+  isEditing: boolean;
+  onEdit: () => void;
+  onBindingChange: (binding: ShortcutBinding) => void;
+}) {
+  const { t } = useI18n();
+  const [tempBinding, setTempBinding] = useState<ShortcutBinding>(shortcut.binding);
+
+  useEffect(() => {
+    setTempBinding(shortcut.binding);
+  }, [shortcut.binding, isEditing]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Ignore standalone modifier keys
+      if (['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) return;
+
+      const modifiers: Modifier[] = [];
+      if (e.metaKey || e.ctrlKey) modifiers.push('cmd');
+      if (e.shiftKey) modifiers.push('shift');
+      if (e.altKey) modifiers.push('alt');
+
+      // At least one modifier is required (Cmd or Ctrl)
+      if (modifiers.length === 0) return;
+
+      const binding: ShortcutBinding = {
+        key: e.key.toLowerCase(),
+        modifiers,
+      };
+      setTempBinding(binding);
+    },
+    []
+  );
+
+  const handleSave = useCallback(() => {
+    onBindingChange(tempBinding);
+    onEdit();
+  }, [tempBinding, onBindingChange, onEdit]);
+
+  const handleCancel = useCallback(() => {
+    setTempBinding(shortcut.binding);
+    onEdit();
+  }, [shortcut.binding, onEdit]);
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        padding: '10px 12px',
+        borderRadius: 8,
+        border: '1px solid var(--color-border)',
+        backgroundColor: 'var(--color-bg-secondary)',
+      }}
+    >
+      <span style={{ flex: 1, fontSize: 13, color: 'var(--color-text-primary)' }}>
+        {t(shortcut.descriptionKey)}
+      </span>
+
+      {isEditing ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input
+            type="text"
+            value={formatShortcut(tempBinding)}
+            onKeyDown={handleKeyDown}
+            placeholder={t('settings.shortcuts.pressKeys')}
+            readOnly
+            autoFocus
+            style={{
+              width: 120,
+              padding: '6px 10px',
+              borderRadius: 6,
+              border: '1px solid var(--color-accent)',
+              backgroundColor: 'var(--color-bg-primary)',
+              color: 'var(--color-text-primary)',
+              fontSize: 13,
+              textAlign: 'center',
+              fontFamily: 'var(--font-mono)',
+              outline: 'none',
+            }}
+          />
+          <button className="btn-icon" onClick={handleSave} title={t('common.save')}>
+            <Check size={14} strokeWidth={1.75} />
+          </button>
+          <button className="btn-icon" onClick={handleCancel} title={t('common.cancel')}>
+            <X size={14} strokeWidth={1.75} />
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <kbd
+            style={{
+              padding: '4px 10px',
+              borderRadius: 6,
+              backgroundColor: 'var(--color-bg-primary)',
+              border: '1px solid var(--color-border)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 12,
+              color: 'var(--color-text-secondary)',
+              minWidth: 80,
+              textAlign: 'center',
+            }}
+          >
+            {formatShortcut(shortcut.binding)}
+          </kbd>
+          {shortcut.editable && (
+            <button className="btn-icon" onClick={onEdit} title={t('common.edit')}>
+              <Pencil size={14} strokeWidth={1.75} />
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

@@ -128,6 +128,7 @@ export const translations = {
     'settings.menu.model': 'Model Settings',
     'settings.menu.ssh': 'SSH Shortcuts',
     'settings.menu.completion': 'Custom Completion',
+    'settings.menu.shortcuts': 'Shortcuts',
 
     // ---- settings: general ----
     'settings.general.title': 'General',
@@ -226,6 +227,36 @@ export const translations = {
     'settings.completion.note': 'Note (optional)',
     'settings.completion.notePlaceholder': 'Defaults to the command itself if blank',
     'settings.completion.noteHint': 'Only shown in the list for easy identification.',
+
+    // ---- settings: shortcuts ----
+    'settings.shortcuts.title': 'Keyboard Shortcuts',
+    'settings.shortcuts.description':
+      'Customimize keyboard shortcuts. Click the edit icon next to a shortcut, then press the desired key combination.',
+    'settings.shortcuts.reset': 'Reset to Defaults',
+    'settings.shortcuts.saved': '✓ Shortcut updated',
+    'settings.shortcuts.conflict': '⚠ Conflicts with "{shortcut}". Please choose a different combination.',
+    'settings.shortcuts.pressKeys': 'Press keys…',
+
+    // ---- shortcuts: categories ----
+    'shortcuts.category.navigation': 'Navigation',
+    'shortcuts.category.terminal': 'Terminal',
+    'shortcuts.category.panel': 'Panel & Theme',
+
+    // ---- shortcuts: descriptions ----
+    'shortcuts.newTerminal': 'New terminal',
+    'shortcuts.closeTerminal': 'Close active terminal',
+    'shortcuts.nextTerminal': 'Next terminal',
+    'shortcuts.prevTerminal': 'Previous terminal',
+    'shortcuts.focusTerminal1': 'Focus terminal #1',
+    'shortcuts.focusTerminal2': 'Focus terminal #2',
+    'shortcuts.focusTerminal3': 'Focus terminal #3',
+    'shortcuts.zoomIn': 'Zoom in',
+    'shortcuts.zoomOut': 'Zoom out',
+    'shortcuts.zoomReset': 'Reset zoom',
+    'shortcuts.toggleSearch': 'Toggle search bar',
+    'shortcuts.toggleLeftPanel': 'Toggle left sidebar',
+    'shortcuts.toggleRightPanel': 'Toggle assistant panel',
+    'shortcuts.toggleTheme': 'Toggle dark/light theme',
 
     // ---- toast messages (from store actions) ----
     'toast.createTerminalFailed': 'Failed to create terminal',
@@ -335,6 +366,7 @@ export const translations = {
     'settings.menu.model': '大模型设置',
     'settings.menu.ssh': 'SSH 快捷方式',
     'settings.menu.completion': '自定义补全',
+    'settings.menu.shortcuts': '快捷键',
 
     // ---- settings: general ----
     'settings.general.title': '常规',
@@ -433,6 +465,36 @@ export const translations = {
     'settings.completion.note': '备注（可选）',
     'settings.completion.notePlaceholder': '留空则使用命令本身',
     'settings.completion.noteHint': '仅用于列表中显示，便于识别。',
+
+    // ---- settings: shortcuts ----
+    'settings.shortcuts.title': '键盘快捷键',
+    'settings.shortcuts.description':
+      '自定义键盘快捷键。点击某项右侧的编辑图标，然后按下新的按键组合即可。',
+    'settings.shortcuts.reset': '恢复默认',
+    'settings.shortcuts.saved': '✓ 快捷键已更新',
+    'settings.shortcuts.conflict': '⚠ 与「{shortcut}」冲突，请选择其它按键组合。',
+    'settings.shortcuts.pressKeys': '按下按键…',
+
+    // ---- shortcuts: categories ----
+    'shortcuts.category.navigation': '导航',
+    'shortcuts.category.terminal': '终端',
+    'shortcuts.category.panel': '面板与主题',
+
+    // ---- shortcuts: descriptions ----
+    'shortcuts.newTerminal': '新建终端',
+    'shortcuts.closeTerminal': '关闭当前终端',
+    'shortcuts.nextTerminal': '下一个终端',
+    'shortcuts.prevTerminal': '上一个终端',
+    'shortcuts.focusTerminal1': '聚焦第 1 个终端',
+    'shortcuts.focusTerminal2': '聚焦第 2 个终端',
+    'shortcuts.focusTerminal3': '聚焦第 3 个终端',
+    'shortcuts.zoomIn': '放大字号',
+    'shortcuts.zoomOut': '缩小字号',
+    'shortcuts.zoomReset': '重置缩放',
+    'shortcuts.toggleSearch': '切换搜索栏',
+    'shortcuts.toggleLeftPanel': '切换左侧边栏',
+    'shortcuts.toggleRightPanel': '切换助手面板',
+    'shortcuts.toggleTheme': '切换深色/浅色主题',
 
     // ---- toast messages (from store actions) ----
     'toast.createTerminalFailed': '创建终端失败',

@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { Command } from '@/types';
+import { validateCommand, validateCommandLabel } from '@/utils/validation';
 
 export interface CreateCommandInput {
   terminalId?: string;
@@ -22,9 +23,21 @@ export interface PinCommandInput {
 
 export const commandService = {
   create(input: CreateCommandInput): Promise<Command> {
+    const cmdResult = validateCommand(input.command);
+    if (!cmdResult.valid) throw new Error(cmdResult.error);
+    const labelResult = validateCommandLabel(input.label);
+    if (!labelResult.valid) throw new Error(labelResult.error);
     return invoke<Command>('command_create', { input });
   },
   update(input: UpdateCommandInput): Promise<Command> {
+    if (input.command) {
+      const result = validateCommand(input.command);
+      if (!result.valid) throw new Error(result.error);
+    }
+    if (input.label) {
+      const result = validateCommandLabel(input.label);
+      if (!result.valid) throw new Error(result.error);
+    }
     return invoke<Command>('command_update', { input });
   },
   remove(id: string): Promise<void> {
