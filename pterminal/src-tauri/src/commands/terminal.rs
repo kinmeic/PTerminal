@@ -250,7 +250,17 @@ pub fn terminal_spawn(
         };
 
     // Build the shell command with a sane environment.
+    // Spawn the shell as a *login* shell. A PTY makes the child interactive
+    // (so ~/.zshrc loads), but it is NOT a login shell unless we say so — and
+    // a GUI-launched app inherits only a minimal environment. Without `-l` the
+    // login startup files (~/.zprofile, ~/.zlogin, /etc/profile → path_helper)
+    // never run, so PATH stays sparse and tools like Homebrew's `brew` are
+    // "not found" even though ~/.zshrc loaded. `-l` is understood by zsh,
+    // bash and fish (the realistic shells here) and mirrors how every desktop
+    // terminal emulator spawns its shell. Kept consistent with
+    // `resolve_login_shell_path` below, which also runs the shell under `-l`.
     let mut cmd = CommandBuilder::new(&shell);
+    cmd.arg("-l");
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");

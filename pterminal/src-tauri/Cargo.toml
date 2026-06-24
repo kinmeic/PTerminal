@@ -15,7 +15,7 @@ too_many_lines = "allow"
 
 [package]
 name = "app"
-version = "1.2.0"
+version = "1.2.1"
 description = "PTerminal - macOS native AI terminal"
 authors = ["you"]
 license = ""
