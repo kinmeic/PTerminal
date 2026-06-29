@@ -20,6 +20,7 @@ fn resolve_db_path(app: &tauri::AppHandle) -> std::path::PathBuf {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -84,6 +85,10 @@ pub fn run() {
             commands::settings::settings_get,
             commands::settings::settings_set,
             commands::settings::proxy_reload,
+            commands::workspace::workspace_create,
+            commands::workspace::workspace_list,
+            commands::workspace::workspace_delete,
+            commands::workspace::workspace_check_paths,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

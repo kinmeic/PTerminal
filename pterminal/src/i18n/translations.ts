@@ -123,6 +123,19 @@ export const translations = {
     'ssh.empty': 'No SSH shortcuts.',
     'ssh.connectTo': 'Connect to {host}',
 
+    // ---- workspaces (folder groupings in the left sidebar) ----
+    'workspaces.title': 'Workspaces',
+    'workspaces.empty': 'No workspaces.',
+    'workspaces.openFolder': 'Open folder as workspace',
+    'workspaces.addTerminal': 'New terminal in this folder',
+    'workspaces.removeFolder': 'Close workspace (removes its terminals)',
+    'workspaces.folderMissing': 'Folder missing on disk',
+    'workspaces.folderMissingHint': 'The folder was deleted or moved',
+    'workspaces.confirmCloseTitle': 'Close workspace?',
+    'workspaces.confirmCloseMessage':
+      'Closing "{name}" will also close its {count} terminal(s) in this workspace. This cannot be undone.',
+    'workspaces.confirmCloseOk': 'Close',
+
     // ---- settings: menu ----
     'settings.menu.general': 'General',
     'settings.menu.model': 'Model Settings',
@@ -275,6 +288,8 @@ export const translations = {
     'toast.openSshFailed': 'Failed to open SSH session',
     'toast.saveAiFailed': 'Failed to save AI settings',
     'toast.clearAiFailed': 'Failed to clear AI messages',
+    'toast.addWorkspaceFailed': 'Failed to open workspace',
+    'toast.removeWorkspaceFailed': 'Failed to close workspace',
   },
 
   'zh-CN': {
@@ -360,6 +375,18 @@ export const translations = {
     'ssh.title': 'SSH',
     'ssh.empty': '暂无 SSH 快捷方式。',
     'ssh.connectTo': '连接到 {host}',
+
+    // ---- workspaces (folder groupings in the left sidebar) ----
+    'workspaces.title': '工作区',
+    'workspaces.empty': '暂无工作区。',
+    'workspaces.openFolder': '打开文件夹作为工作区',
+    'workspaces.addTerminal': '在该文件夹下新建终端',
+    'workspaces.removeFolder': '关闭工作区（一并删除其下终端）',
+    'workspaces.folderMissing': '文件夹在磁盘上已不存在',
+    'workspaces.folderMissingHint': '该文件夹已被删除或移动',
+    'workspaces.confirmCloseTitle': '关闭工作区？',
+    'workspaces.confirmCloseMessage': '关闭「{name}」将同时关闭其下 {count} 个终端，且无法撤销。',
+    'workspaces.confirmCloseOk': '关闭',
 
     // ---- settings: menu ----
     'settings.menu.general': '常规',
@@ -513,6 +540,8 @@ export const translations = {
     'toast.openSshFailed': '打开 SSH 会话失败',
     'toast.saveAiFailed': '保存 AI 设置失败',
     'toast.clearAiFailed': '清空 AI 消息失败',
+    'toast.addWorkspaceFailed': '打开工作区失败',
+    'toast.removeWorkspaceFailed': '关闭工作区失败',
   },
 } as const;
 

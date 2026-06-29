@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { listen } from '@tauri-apps/api/event';
-import type { Terminal, Command, AIMessage, AIConfig, SshShortcut } from '@/types';
+import type { Terminal, Command, AIMessage, AIConfig, SshShortcut, Workspace, WorkspacePathStatus } from '@/types';
 import { terminalService } from '@/services/terminalService';
 import { terminalRegistry } from '@/services/terminalRegistry';
 import {
@@ -8,6 +8,7 @@ import {
   type CreateCommandInput,
 } from '@/services/commandService';
 import { sshService, type CreateSshShortcutInput, type UpdateSshShortcutInput } from '@/services/sshService';
+import { workspaceService } from '@/services/workspaceService';
 import { aiService } from '@/services/aiService';
 import { settingsService, SETTING_KEYS } from '@/services/settingsService';
 import { dismissTerminalAutocomplete } from '@/services/autocompleteEvents';
@@ -33,6 +34,11 @@ interface AppState {
   aiMessagesTotal: number;
   // SSH shortcuts (global, shared across terminals)
   sshShortcuts: SshShortcut[];
+
+  // Workspaces (folders pinned to the sidebar, each grouping its own terminals)
+  workspaces: Workspace[];
+  /** Workspace ids whose backing folder is missing on disk (greyed-out / disabled). */
+  missingWorkspaceIds: string[];
 
   // AI state
   aiConfig: AIConfig | null;
@@ -78,7 +84,7 @@ interface AppState {
   /** Ensure the terminal has a live PTY session, spawning one (restore) if missing. */
   ensureSession: (id: string) => Promise<void>;
   loadTerminals: () => Promise<void>;
-  createTerminal: (opts?: { name?: string; cwd?: string }) => Promise<string | null>;
+  createTerminal: (opts?: { name?: string; cwd?: string; workspaceId?: string }) => Promise<string | null>;
   deleteTerminal: (id: string) => Promise<void>;
   /** Handle a shell that exited naturally (e.g. user typed `exit`). Removes
    *  the terminal from the sidebar/store/DB. No-op if the terminal is already
@@ -115,6 +121,17 @@ interface AppState {
   removeSshShortcut: (id: string) => Promise<void>;
   /** Open a new terminal and run the ssh command for this shortcut. */
   openSshShortcut: (shortcut: SshShortcut) => Promise<void>;
+
+  // --- Workspaces (folder groupings) ---
+  loadWorkspaces: () => Promise<void>;
+  /** Open a folder as a workspace (idempotent on path). */
+  addWorkspace: (path: string) => Promise<string | null>;
+  /** Remove a workspace, cascading its terminals. */
+  removeWorkspace: (id: string) => Promise<void>;
+  /** Update the missing-on-disk flags from a batch path-existence check. */
+  applyWorkspacePathStatus: (statuses: WorkspacePathStatus[]) => void;
+  /** Create a terminal grouped under a workspace (cwd anchored to its folder). */
+  createWorkspaceTerminal: (workspaceId: string) => Promise<string | null>;
 
   // --- AI ---
   loadAiConfig: () => Promise<void>;
@@ -219,6 +236,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   aiMessages: [],
   aiMessagesTotal: 0,
   sshShortcuts: [],
+  workspaces: [],
+  missingWorkspaceIds: [],
   aiConfig: null,
   isAiStreaming: false,
   activeAiRequestId: null,
@@ -307,6 +326,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const terminal = await terminalService.spawn({
         name: opts?.name,
         cwd: opts?.cwd,
+        workspaceId: opts?.workspaceId,
         cols: 80,
         rows: 24,
       });
@@ -588,6 +608,78 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch (err) {
       toast.error(tt('toast.openSshFailed')); console.error(err);
     }
+  },
+
+  loadWorkspaces: async () => {
+    try {
+      const workspaces = await workspaceService.list();
+      set({ workspaces });
+    } catch (err) {
+      console.error('Failed to load workspaces:', err);
+    }
+  },
+
+  addWorkspace: async (path) => {
+    try {
+      const created = await workspaceService.create(path);
+      set((state) => {
+        // De-dupe in case the backend returned an already-known workspace
+        // (same path re-opened) so the sidebar never shows a duplicate group.
+        const exists = state.workspaces.some((w) => w.id === created.id);
+        return { workspaces: exists ? state.workspaces : [...state.workspaces, created] };
+      });
+      return created.id;
+    } catch (err) {
+      toast.error(tt('toast.addWorkspaceFailed')); console.error(err);
+      return null;
+    }
+  },
+
+  removeWorkspace: async (id) => {
+    const removedTerminalIds = get()
+        .terminals.filter((t) => t.workspaceId === id)
+        .map((t) => t.id);
+    try {
+      await workspaceService.remove(id);
+      // The backend cascaded-deleted the workspace's terminals; mirror that in
+      // the store and dispose any live xterm instances, then re-select a
+      // remaining terminal if the active one was removed.
+      removedTerminalIds.forEach((tid) => terminalRegistry.dispose(tid));
+      set((state) => {
+        const filtered = state.terminals.filter((t) => t.workspaceId !== id);
+        const activeRemoved =
+          state.activeTerminalId !== null &&
+          removedTerminalIds.includes(state.activeTerminalId);
+        const newActive = activeRemoved
+          ? filtered.length > 0
+            ? filtered[filtered.length - 1].id
+            : null
+          : state.activeTerminalId;
+        return {
+          workspaces: state.workspaces.filter((w) => w.id !== id),
+          missingWorkspaceIds: state.missingWorkspaceIds.filter((mid) => mid !== id),
+          terminals: filtered,
+          activeTerminalId: newActive,
+          // The find bar may have been bound to a now-deleted terminal.
+          isSearchBarVisible: activeRemoved ? false : state.isSearchBarVisible,
+        };
+      });
+    } catch (err) {
+      toast.error(tt('toast.removeWorkspaceFailed')); console.error(err);
+    }
+  },
+
+  applyWorkspacePathStatus: (statuses) => {
+    const missing = statuses.filter((s) => !s.exists).map((s) => s.id);
+    set({ missingWorkspaceIds: missing });
+  },
+
+  createWorkspaceTerminal: async (workspaceId) => {
+    const workspace = get().workspaces.find((w) => w.id === workspaceId);
+    if (!workspace) return null;
+    // Anchor the terminal's cwd to the workspace folder.
+    const newId = await get().createTerminal({ cwd: workspace.path, workspaceId });
+    return newId;
   },
 
   loadAiConfig: async () => {

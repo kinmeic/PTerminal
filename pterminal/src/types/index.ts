@@ -15,6 +15,8 @@ export interface Terminal {
   pinOrder: number;
   /** Per-terminal font size override. Undefined = use the global default. */
   fontSize?: number;
+  /** Workspace id grouping this terminal under a folder (undefined = top-level). */
+  workspaceId?: string;
 }
 
 export interface Command {
@@ -81,6 +83,23 @@ export interface SpawnTerminalInput {
   name?: string;
   cols?: number;
   rows?: number;
+  /** Workspace id to group this terminal under a folder. */
+  workspaceId?: string;
+}
+
+/** A folder pinned to the sidebar; terminals under it are grouped beneath it. */
+export interface Workspace {
+  id: string;
+  path: string;
+  name: string;
+  createdAt: number;
+  sortOrder: number;
+}
+
+/** Per-workspace folder-existence result returned by `workspace_check_paths`. */
+export interface WorkspacePathStatus {
+  id: string;
+  exists: boolean;
 }
 
 export interface TerminalSize {

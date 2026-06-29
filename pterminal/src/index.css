@@ -567,6 +567,22 @@ body {
   background-color: var(--color-bg-tertiary);
 }
 
+/* Workspace folder row: the add/close action cluster is hidden by default and
+   revealed on row hover, mirroring the top-level terminal rows' close button.
+   NOTE: opacity must live here in CSS, not as an inline style — inline styles
+   have higher specificity than the `.group:hover` rule and would pin it at 0. */
+.workspace-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.group:hover .workspace-actions {
+  opacity: 1;
+}
+
 /* Button styles */
 .btn {
   display: inline-flex;

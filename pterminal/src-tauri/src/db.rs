@@ -160,6 +160,24 @@ fn run_migrations(pool: &DbPool) -> Result<()> {
             7,
             "ALTER TABLE terminals ADD COLUMN font_size INTEGER;",
         ),
+        // Workspaces (打开的文件夹分组). A workspace is a folder pinned to the
+        // sidebar; terminals created under it carry its id so they render as a
+        // nested group. `workspace_id` is nullable so existing loose terminals
+        // (top-level TERMINALS list) are unaffected. ON DELETE SET NULL is just a
+        // safety net — the workspace delete command cascades its terminals first.
+        (
+            8,
+            "CREATE TABLE IF NOT EXISTS workspaces (
+                id TEXT PRIMARY KEY,
+                path TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_workspaces_sort ON workspaces(sort_order);
+            ALTER TABLE terminals ADD COLUMN workspace_id TEXT REFERENCES workspaces(id) ON DELETE SET NULL;
+            CREATE INDEX IF NOT EXISTS idx_terminals_workspace ON terminals(workspace_id);",
+        ),
     ];
 
     for (version, sql) in migrations.iter() {

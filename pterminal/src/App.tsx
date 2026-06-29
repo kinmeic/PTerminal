@@ -29,6 +29,7 @@ function App() {
   const loadCustomCompletions = useAppStore((s) => s.loadCustomCompletions);
   const loadAppearance = useAppStore((s) => s.loadAppearance);
   const loadUiState = useAppStore((s) => s.loadUiState);
+  const loadWorkspaces = useAppStore((s) => s.loadWorkspaces);
   const setFullscreen = useAppStore((s) => s.setFullscreen);
   const activeView = useAppStore((s) => s.activeView);
   const setActiveView = useAppStore((s) => s.setActiveView);
@@ -40,7 +41,8 @@ function App() {
     void loadCustomCompletions();
     void loadAppearance();
     void loadUiState();
-  }, [loadTerminals, loadSshShortcuts, loadCustomCompletions, loadAppearance, loadUiState]);
+    void loadWorkspaces();
+  }, [loadTerminals, loadSshShortcuts, loadCustomCompletions, loadAppearance, loadUiState, loadWorkspaces]);
 
   // Track native fullscreen state (需求 2). Tauri 2 has no dedicated
   // fullscreen event, but `tauri://resize` (fired by `onResized`) is the

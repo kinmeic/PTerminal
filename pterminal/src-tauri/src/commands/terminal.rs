@@ -228,9 +228,9 @@ pub fn terminal_spawn(
                     .unwrap_or(1);
                 let name = localized_terminal_name(&state, seq);
                 tx.execute(
-                    "INSERT INTO terminals (id, name, cwd, shell, env, created_at, updated_at, is_active, sort_order, is_pinned, pin_order)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, 1, ?7, 0, 0)",
-                    params![id, name, cwd, shell, env_json, now, seq],
+                    "INSERT INTO terminals (id, name, cwd, shell, env, created_at, updated_at, is_active, sort_order, is_pinned, pin_order, workspace_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, 1, ?7, 0, 0, ?8)",
+                    params![id, name, cwd, shell, env_json, now, seq, input.workspace_id],
                 )
                 .map_err(|e| e.to_string())?;
                 tx.commit().map_err(|e| e.to_string())?;
@@ -240,9 +240,9 @@ pub fn terminal_spawn(
             // auto-name branch above did it inside the transaction).
             if input.name.is_some() {
                 conn.execute(
-                    "INSERT INTO terminals (id, name, cwd, shell, env, created_at, updated_at, is_active, sort_order, is_pinned, pin_order)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, 1, ?7, 0, 0)",
-                    params![id, name, cwd, shell, env_json, now, sort_order],
+                    "INSERT INTO terminals (id, name, cwd, shell, env, created_at, updated_at, is_active, sort_order, is_pinned, pin_order, workspace_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, 1, ?7, 0, 0, ?8)",
+                    params![id, name, cwd, shell, env_json, now, sort_order, input.workspace_id],
                 )
                 .map_err(|e| e.to_string())?;
             }
@@ -600,7 +600,7 @@ pub fn terminal_list(state: State<'_, AppState>) -> Result<Vec<TerminalDto>, Str
     let conn: DbConn = state.db.get().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(
-            "SELECT id, name, cwd, shell, env, created_at, updated_at, is_active, sort_order, is_pinned, pin_order, font_size
+            "SELECT id, name, cwd, shell, env, created_at, updated_at, is_active, sort_order, is_pinned, pin_order, font_size, workspace_id
              FROM terminals ORDER BY is_pinned DESC, pin_order ASC, created_at ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -619,6 +619,7 @@ pub fn terminal_list(state: State<'_, AppState>) -> Result<Vec<TerminalDto>, Str
                 is_pinned: row.get::<_, i64>(9)? != 0,
                 pin_order: row.get(10)?,
                 font_size: row.get(11)?,
+                workspace_id: row.get(12)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -666,7 +667,14 @@ pub fn terminal_update(
 /// Delete a terminal configuration (and kill any live session).
 #[tauri::command]
 pub fn terminal_delete(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    if let Some(session_arc) = state.remove_session(&id) {
+    delete_terminal_by_id(&state, &id)
+}
+
+/// Core delete logic shared by `terminal_delete` and the workspace cascade.
+/// Kills any live PTY session and removes the DB row (which cascades to
+/// commands / ai_messages via FK ON DELETE CASCADE).
+pub(crate) fn delete_terminal_by_id(state: &AppState, id: &str) -> Result<(), String> {
+    if let Some(session_arc) = state.remove_session(id) {
         let mut session = session_arc.lock().unwrap_or_else(|poisoned| {
             // Mutex was poisoned (a thread panicked while holding the lock).
             // Recover by taking the inner data rather than propagating the
@@ -745,7 +753,7 @@ pub fn terminal_set_font_size(
 fn fetch_terminal(state: &AppState, id: &str) -> Result<TerminalDto, String> {
     let conn: DbConn = state.db.get().map_err(|e| e.to_string())?;
     conn.query_row(
-        "SELECT id, name, cwd, shell, env, created_at, updated_at, is_active, sort_order, is_pinned, pin_order, font_size
+        "SELECT id, name, cwd, shell, env, created_at, updated_at, is_active, sort_order, is_pinned, pin_order, font_size, workspace_id
          FROM terminals WHERE id = ?1",
         params![id],
         |row| {
@@ -762,6 +770,7 @@ fn fetch_terminal(state: &AppState, id: &str) -> Result<TerminalDto, String> {
                 is_pinned: row.get::<_, i64>(9)? != 0,
                 pin_order: row.get(10)?,
                 font_size: row.get(11)?,
+                workspace_id: row.get(12)?,
             })
         },
     )

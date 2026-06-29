@@ -8,12 +8,18 @@ import {
   PinOff,
   Pencil,
   Trash2,
+  Folder,
+  FolderOpen,
+  ChevronRight,
+  ChevronDown,
 } from 'lucide-react';
+import { open as openDialog, confirm } from '@tauri-apps/plugin-dialog';
 import { useAppStore } from '@/stores/appStore';
 import { useI18n } from '@/i18n/I18nProvider';
 import { SshShortcuts } from '@/components/ssh/SshShortcuts';
 import { dismissTerminalAutocomplete } from '@/services/autocompleteEvents';
-import type { Terminal } from '@/types';
+import { workspaceService } from '@/services/workspaceService';
+import type { Terminal, Workspace } from '@/types';
 
 /**
  * Left sidebar. Split vertically into three regions:
@@ -73,7 +79,9 @@ export function LeftPanel() {
         </button>
       </div>
 
-      {/* Top region — terminal list (takes remaining height, scrolls) */}
+      {/* Top region — terminal list (takes remaining height, scrolls).
+          Only loose terminals (no workspace grouping) are shown here; those
+          grouped under a workspace render in the WORKSPACES section below. */}
       <div className="flex-1 min-h-0 overflow-y-auto py-1">
         {terminals.length === 0 ? (
           <div
@@ -90,24 +98,30 @@ export function LeftPanel() {
           </div>
         ) : (
           terminals.map((t, index) => (
-            <TerminalRow
-              key={t.id}
-              terminal={t}
-              index={index}
-              active={activeTerminalId === t.id}
-              renaming={renamingId === t.id}
-              onSelect={() => setActiveTerminal(t.id)}
-              onDelete={() => void deleteTerminal(t.id)}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setMenu({ x: e.clientX, y: e.clientY, terminal: t });
-              }}
-              onRenameDone={() => setRenamingId(null)}
-            />
+            t.workspaceId ? null : (
+              <TerminalRow
+                key={t.id}
+                terminal={t}
+                index={index}
+                active={activeTerminalId === t.id}
+                renaming={renamingId === t.id}
+                onSelect={() => setActiveTerminal(t.id)}
+                onDelete={() => void deleteTerminal(t.id)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setMenu({ x: e.clientX, y: e.clientY, terminal: t });
+                }}
+                onRenameDone={() => setRenamingId(null)}
+              />
+            )
           ))
         )}
       </div>
+
+      {/* Workspaces region — open folders, each grouping its own terminals.
+          Sits between the terminal list and the SSH section. */}
+      <WorkspacesSection />
 
       {/* Middle region — SSH shortcuts (shrink-0, internally scrollable) */}
       <div
@@ -168,6 +182,292 @@ export function LeftPanel() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * WORKSPACES section of the left sidebar: open folders, each rendered as a
+ * group with its own terminals nested beneath. Polls the backend every few
+ * seconds to detect folders that were deleted on disk; those groups (and their
+ * terminals) are greyed-out and disabled until the user closes them.
+ */
+function WorkspacesSection() {
+  const workspaces = useAppStore((s) => s.workspaces);
+  const missingWorkspaceIds = useAppStore((s) => s.missingWorkspaceIds);
+  const addWorkspace = useAppStore((s) => s.addWorkspace);
+  const { t } = useI18n();
+
+  // Poll the backend for folder existence. A missing folder never auto-deletes
+  // the records (avoiding accidental data loss) — it only greys out the group.
+  // The user must explicitly close it. Re-querying on an interval also covers
+  // the case where a previously-missing folder is recreated at the same path.
+  const applyWorkspacePathStatus = useAppStore((s) => s.applyWorkspacePathStatus);
+  useEffect(() => {
+    if (workspaces.length === 0) return;
+    const ids = workspaces.map((w) => w.id);
+    // Fire one check immediately, then on the interval.
+    void workspaceService.checkPaths(ids).then(applyWorkspacePathStatus).catch(() => {});
+    const handle = setInterval(() => {
+      void workspaceService.checkPaths(ids).then(applyWorkspacePathStatus).catch(() => {});
+    }, 3000);
+    return () => clearInterval(handle);
+  }, [workspaces, applyWorkspacePathStatus]);
+
+  const handleOpenFolder = async () => {
+    try {
+      const selected = await openDialog({ directory: true, multiple: false });
+      if (typeof selected === 'string' && selected.length > 0) {
+        await addWorkspace(selected);
+      }
+    } catch (err) {
+      console.error('Failed to open folder dialog:', err);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        flexShrink: 0,
+        borderTop: '1px solid var(--color-border)',
+        maxHeight: '40vh',
+        overflowY: 'auto',
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
+      {/* Section header: label + open-folder button */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '0 8px 0 12px',
+          height: 28,
+          flexShrink: 0,
+        }}
+      >
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            textTransform: 'uppercase',
+            letterSpacing: 0.5,
+            color: 'var(--color-text-secondary)',
+          }}
+        >
+          {t('workspaces.title')}
+        </span>
+        <button
+          className="collapse-button"
+          title={t('workspaces.openFolder')}
+          onClick={() => void handleOpenFolder()}
+        >
+          <FolderOpen size={16} strokeWidth={1.75} />
+        </button>
+      </div>
+
+      <div style={{ paddingBottom: 4 }}>
+        {workspaces.length === 0 ? (
+          <div
+            style={{
+              padding: '8px 14px',
+              fontSize: 11,
+              color: 'var(--color-text-muted)',
+            }}
+          >
+            {t('workspaces.empty')}
+          </div>
+        ) : (
+          workspaces.map((w) => (
+            <WorkspaceRow
+              key={w.id}
+              workspace={w}
+              missing={missingWorkspaceIds.includes(w.id)}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** One workspace folder group: the folder row + its nested terminals. */
+function WorkspaceRow({
+  workspace,
+  missing,
+}: {
+  workspace: Workspace;
+  missing: boolean;
+}) {
+  const terminals = useAppStore((s) => s.terminals);
+  const activeTerminalId = useAppStore((s) => s.activeTerminalId);
+  const setActiveTerminal = useAppStore((s) => s.setActiveTerminal);
+  const createWorkspaceTerminal = useAppStore((s) => s.createWorkspaceTerminal);
+  const removeWorkspace = useAppStore((s) => s.removeWorkspace);
+  const deleteTerminal = useAppStore((s) => s.deleteTerminal);
+  const { t } = useI18n();
+
+  const childTerminals = terminals.filter((tm) => tm.workspaceId === workspace.id);
+  // Expanded by default; clicking the folder row toggles its nested terminals.
+  const [expanded, setExpanded] = useState(true);
+
+  // Closing a workspace cascades its terminals, so confirm first when there is
+  // at least one terminal under it (avoids accidental loss of running shells).
+  const handleRemove = async () => {
+    if (childTerminals.length > 0) {
+      const ok = await confirm(
+        t('workspaces.confirmCloseMessage', { name: workspace.name, count: childTerminals.length }),
+        { title: t('workspaces.confirmCloseTitle'), okLabel: t('workspaces.confirmCloseOk'), kind: 'warning' }
+      );
+      if (!ok) return;
+    }
+    void removeWorkspace(workspace.id);
+  };
+
+  return (
+    <div style={{ opacity: missing ? 0.4 : 1 }}>
+      {/* Folder header row */}
+      <div
+        className="ssh-item group"
+        style={{ cursor: missing ? 'default' : 'pointer' }}
+        title={
+          missing
+            ? `${workspace.path}\n${t('workspaces.folderMissingHint')}`
+            : workspace.path
+        }
+        onClick={() => {
+          if (missing) return;
+          // Clicking the folder row toggles its nested terminals.
+          setExpanded((v) => !v);
+        }}
+      >
+        <span
+          style={{
+            display: 'inline-flex',
+            color: missing ? 'var(--color-danger)' : 'var(--color-accent)',
+            flexShrink: 0,
+          }}
+        >
+          {missing ? (
+            <Folder size={14} strokeWidth={1.75} />
+          ) : expanded ? (
+            <ChevronDown size={14} strokeWidth={1.75} />
+          ) : (
+            <ChevronRight size={14} strokeWidth={1.75} />
+          )}
+        </span>
+        <span
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            flex: 1,
+            minWidth: 0,
+            lineHeight: 1.3,
+          }}
+        >
+          <span
+            className="truncate"
+            style={{ fontSize: 13, color: 'var(--color-text-primary)' }}
+          >
+            {workspace.name}
+          </span>
+        </span>
+
+        {/* Add / close actions. Hidden until the row is hovered (mirrors the
+            top-level terminal rows' close button); disabled when missing. */}
+        <div
+          className="workspace-actions"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            className="collapse-button"
+            title={t('workspaces.addTerminal')}
+            disabled={missing}
+            style={{
+              opacity: missing ? 0 : undefined,
+            }}
+            onClick={() => {
+              dismissTerminalAutocomplete();
+              void createWorkspaceTerminal(workspace.id);
+            }}
+          >
+            <Plus size={14} strokeWidth={1.75} />
+          </button>
+          <button
+            className="collapse-button"
+            title={t('workspaces.removeFolder')}
+            onClick={() => void handleRemove()}
+          >
+            <X size={14} strokeWidth={1.75} />
+          </button>
+        </div>
+      </div>
+
+      {/* Nested terminals under this folder. */}
+      {expanded && (
+        <div style={{ paddingLeft: 14 }}>
+          {childTerminals.map((tm) => (
+            <WorkspaceTerminalRow
+              key={tm.id}
+              terminal={tm}
+              active={activeTerminalId === tm.id}
+              disabled={missing}
+              onSelect={() => {
+                if (missing) return;
+                setActiveTerminal(tm.id);
+              }}
+              onDelete={() => void deleteTerminal(tm.id)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A terminal row nested under a workspace folder. A simplified TerminalRow:
+ *  no ⌘N shortcut badge (those are reserved for top-level terminals). */
+function WorkspaceTerminalRow({
+  terminal,
+  active,
+  disabled,
+  onSelect,
+  onDelete,
+}: {
+  terminal: Terminal;
+  active: boolean;
+  disabled: boolean;
+  onSelect: () => void;
+  onDelete: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div
+      className={`terminal-item group ${active ? 'active' : ''}`}
+      style={{
+        cursor: disabled ? 'default' : 'pointer',
+        pointerEvents: disabled ? 'none' : undefined,
+      }}
+      onClick={onSelect}
+      title={terminal.cwd}
+    >
+      <span style={{ display: 'inline-flex', color: 'var(--color-success)', flexShrink: 0 }}>
+        <Circle size={9} strokeWidth={0} fill="currentColor" />
+      </span>
+      <span className="truncate flex-1">{terminal.name}</span>
+      <div className="terminal-row-actions">
+        <button
+          className="terminal-close-btn"
+          title={t('leftPanel.deleteTerminal')}
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+        >
+          <X size={14} strokeWidth={1.75} />
+        </button>
+      </div>
     </div>
   );
 }

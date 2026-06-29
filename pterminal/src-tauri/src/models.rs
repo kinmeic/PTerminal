@@ -17,6 +17,8 @@ pub struct TerminalDto {
     pub pin_order: i64,
     /// Per-terminal font size override. None = use the global default.
     pub font_size: Option<i64>,
+    /// Id of the workspace this terminal belongs to (None = top-level terminal).
+    pub workspace_id: Option<String>,
 }
 
 /// Input for creating a new terminal session.
@@ -32,6 +34,8 @@ pub struct SpawnTerminalInput {
     pub name: Option<String>,
     pub cols: Option<u16>,
     pub rows: Option<u16>,
+    /// Workspace id to group this terminal under (None = top-level terminal).
+    pub workspace_id: Option<String>,
 }
 
 /// Payload emitted with the `terminal-data` event.
@@ -181,8 +185,8 @@ pub struct LocalCompletionInput {
     pub limit: Option<usize>,
 }
 
-/// A local autocomplete candidate. `text` is the full command line after
-/// applying the completion, matching the AI autocomplete contract.
+/// Data transfer object for a local autocomplete candidate. `text` is the full
+/// command line after applying the completion, matching the AI autocomplete contract.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalCompletionDto {
@@ -190,4 +194,30 @@ pub struct LocalCompletionDto {
     pub kind: String,
     pub source: String,
     pub score: i64,
+}
+
+/// Data transfer object for a workspace (a folder pinned to the sidebar).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceDto {
+    pub id: String,
+    pub path: String,
+    pub name: String,
+    pub created_at: i64,
+    pub sort_order: i64,
+}
+
+/// Input for opening a workspace by folder path.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateWorkspaceInput {
+    pub path: String,
+}
+
+/// Per-workspace existence-check result used by the frontend's deletion monitor.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePathStatusDto {
+    pub id: String,
+    pub exists: bool,
 }
